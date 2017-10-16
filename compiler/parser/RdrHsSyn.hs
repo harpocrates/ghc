@@ -470,7 +470,10 @@ So the plan is:
 -}
 
 splitCon :: LHsType GhcPs
-      -> P (Located RdrName, HsConDeclDetails GhcPs, Maybe LHsDocString)
+      -> P ( Located RdrName         -- constructor name
+           , HsConDeclDetails GhcPs  -- constructor field information
+           , Maybe LHsDocString      -- docstring to go on the constructor
+           )
 -- See Note [Parsing data constructors is hard]
 -- This gets given a "type" that should look like
 --      C Int Bool
@@ -485,7 +488,7 @@ splitCon ty
    unrollApps t = [t]
 
    apps = unrollApps ty
-   oneDoc = 1 == length [ () | L _ (HsDocTy _ _) <- apps ]
+   oneDoc = [ () | L _ (HsDocTy _ _) <- apps ] `lengthIs` 1
 
    -- the trailing doc, if any, can be extracted first
    (apps', trailing_doc)
@@ -493,8 +496,9 @@ splitCon ty
          L _ (HsDocTy t ds) : ts | oneDoc -> (t : ts, Just ds)
          ts -> (ts, Nothing)
 
-   -- A comment on the constructor is handled a but differently - it doesn't
-   -- remain an 'HsDocTy'
+   -- A comment on the constructor is handled a bit differently - it doesn't
+   -- remain an 'HsDocTy', but gets lifted out and returned as the third
+   -- element of the tuple.
    split [ L _ (HsDocTy con con_doc) ] ts = do
      (data_con, con_details, con_doc') <- split [con] ts
      return (data_con, con_details, con_doc' `mplus` Just con_doc)
