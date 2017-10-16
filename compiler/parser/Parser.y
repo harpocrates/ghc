@@ -48,7 +48,7 @@ import PackageConfig
 import OrdList
 import BooleanFormula   ( BooleanFormula(..), LBooleanFormula(..), mkTrue )
 import FastString
-import Maybes           ( orElse )
+import Maybes           ( isJust, orElse )
 import Outputable
 
 -- compiler/basicTypes
@@ -1846,8 +1846,8 @@ btype :: { LHsType GhcPs }
 -- > data Foo = Int :+ Char :* Bool
 -- See also Note [Parsing data constructors is hard] in RdrHsSyn
 btype_no_ops :: { LHsType GhcPs }
-        : btype_no_ops atype            { sLL $1 $> $ HsAppTy $1 $2 }
-        | atype                         { $1 }
+        : btype_no_ops atype_docs       { sLL $1 $> $ HsAppTy $1 $2 }
+        | atype_docs                    { $1 }
 
 tyapps :: { Located [LHsAppType GhcPs] }   -- NB: This list is reversed
         : tyapp                         { sL1 $1 [$1] }
@@ -1862,6 +1862,9 @@ tyapp :: { LHsAppType GhcPs }
                                                [mj AnnSimpleQuote $1] }
         | SIMPLEQUOTE varop             {% ams (sLL $1 $> $ HsAppInfix $2)
                                                [mj AnnSimpleQuote $1] }
+atype_docs :: { LHsType GhcPs }
+        : atype docprev                 { sLL $1 $> $ HsDocTy $1 $2 }
+        | atype                         { $1 }
 
 atype :: { LHsType GhcPs }
         : ntgtycon                       { sL1 $1 (HsTyVar NotPromoted $1) }      -- Not including unit tuples
@@ -2063,7 +2066,7 @@ gadt_constr_with_doc
 gadt_constr :: { LConDecl GhcPs }
     -- see Note [Difference in parsing GADT and data constructors]
     -- Returns a list because of:   C,D :: ty
-        : con_list '::' sigtype
+        : con_list '::' sigtypedoc
                 {% ams (sLL $1 $> (mkGadtDecl (unLoc $1) (mkLHsSigType $3)))
                        [mu AnnDcolon $2] }
 
@@ -2090,29 +2093,34 @@ constrs1 :: { Located [LConDecl GhcPs] }
         | constr                                          { sL1 $1 [$1] }
 
 constr :: { LConDecl GhcPs }
-        : maybe_docnext forall context_no_ops '=>' constr_stuff maybe_docprev
-                {% ams (let (con,details) = unLoc $5 in
+        : maybe_docnext forall context_no_ops '=>' constr_stuff
+                {% ams (let (con,details,doc_prev) = unLoc $5 in
                   addConDoc (L (comb4 $2 $3 $4 $5) (mkConDeclH98 con
                                                    (snd $ unLoc $2) $3 details))
-                            ($1 `mplus` $6))
+                            ($1 `mplus` doc_prev))
                         (mu AnnDarrow $4:(fst $ unLoc $2)) }
-        | maybe_docnext forall constr_stuff maybe_docprev
-                {% ams ( let (con,details) = unLoc $3 in
+        | maybe_docnext forall constr_stuff
+                {% ams ( let (con,details,doc_prev) = unLoc $3 in
                   addConDoc (L (comb2 $2 $3) (mkConDeclH98 con
                                            (snd $ unLoc $2) (noLoc []) details))
-                            ($1 `mplus` $4))
+                            ($1 `mplus` doc_prev))
                        (fst $ unLoc $2) }
 
 forall :: { Located ([AddAnn], Maybe [LHsTyVarBndr GhcPs]) }
         : 'forall' tv_bndrs '.'       { sLL $1 $> ([mu AnnForall $1,mj AnnDot $3], Just $2) }
         | {- empty -}                 { noLoc ([], Nothing) }
 
-constr_stuff :: { Located (Located RdrName, HsConDeclDetails GhcPs) }
+constr_stuff :: { Located (Located RdrName, HsConDeclDetails GhcPs, Maybe LHsDocString) }
     -- See Note [Parsing data constructors is hard] in RdrHsSyn
         : btype_no_ops                         {% do { c <- splitCon $1
                                                      ; return $ sLL $1 $> c } }
-        | btype_no_ops conop btype_no_ops      {% do { ty <- splitTilde $1
-                                                     ; return $ sLL $1 $> ($2, InfixCon ty $3) } }
+        | btype_no_ops conop maybe_docprev btype_no_ops
+            {% do { lhs <- splitTilde $1
+                  ; (_, ds_l) <- checkInfixConstr lhs
+                  ; (rhs, ds_r) <- checkInfixConstr $4
+                  ; return $ if isJust (ds_l `mplus` $3)
+                               then sLL $1 $> ($2, InfixCon lhs $4, $3)
+                               else sLL $1 $> ($2, InfixCon lhs rhs, ds_r) } }
 
 fielddecls :: { [LConDeclField GhcPs] }
         : {- empty -}     { [] }
