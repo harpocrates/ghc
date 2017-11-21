@@ -895,11 +895,11 @@ genCall blockMap regMap target dsts args = case target of
         src'  <- bind2 cast (EDSL.i (widthInBits w)) (exprToVar blockMap regMap src)
         mask' <- bind2 cast (EDSL.i (widthInBits w)) (exprToVar blockMap regMap mask)
 
-        arch <- platformArch . targetPlatform <$> getDynFlags
+        hasBmi <- isBmiEnabled <$> getDynFlags
         f <- let w' = widthInBits w
-                 fn = case arch of
-                   ArchX86_64 -> "llvm.x86.bmi.pdep."
-                   _ ->  "hs_pdep"
+                 fn = if hasBmi
+                      then "llvm.x86.bmi.pdep."
+                      else "hs_pdep"
              in EDSL.fun (fn ++ show w') =<< [ EDSL.i w', EDSL.i w' ] --> EDSL.i w'
 
         Just ret <- EDSL.ccall f [ src', mask' ]
@@ -915,10 +915,11 @@ genCall blockMap regMap target dsts args = case target of
 
         arch <- platformArch . targetPlatform <$> getDynFlags
 
+        hasBmi <- isBmiEnabled <$> getDynFlags
         f <- let w' = widthInBits w
-                 fn = case arch of
-                   ArchX86_64 -> "llvm.x86.bmi.pext."
-                   _ ->  "hs_pext"
+                 fn = if hasBmi
+                      then "llvm.x86.bmi.pext."
+                      else "hs_pext"
              in EDSL.fun (fn ++ show w') =<< [ EDSL.i w', EDSL.i w' ] --> EDSL.i w'
 
         Just ret <- EDSL.ccall f [ src', mask' ]
