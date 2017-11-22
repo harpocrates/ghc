@@ -243,7 +243,7 @@ data THMessage a where
   AddModFinalizer :: RemoteRef (TH.Q ()) -> THMessage (THResult ())
   AddCorePlugin :: String -> THMessage (THResult ())
   AddTopDecls :: [TH.Dec] -> THMessage (THResult ())
-  AddForeignFile :: ForeignSrcLang -> FilePath -> THMessage (THResult ())
+  AddForeignFilePath :: ForeignSrcLang -> FilePath -> THMessage (THResult ())
   IsExtEnabled :: Extension -> THMessage (THResult Bool)
   ExtsEnabled :: THMessage (THResult [Extension])
 
@@ -281,7 +281,7 @@ getTHMessage = do
     16 -> THMsg <$> EndRecover <$> get
     17 -> return (THMsg RunTHDone)
     18 -> THMsg <$> AddModFinalizer <$> get
-    19 -> THMsg <$> (AddForeignFile <$> get <*> get)
+    19 -> THMsg <$> (AddForeignFilePath <$> get <*> get)
     _  -> THMsg <$> AddCorePlugin <$> get
 
 putTHMessage :: THMessage a -> Put
@@ -305,7 +305,7 @@ putTHMessage m = case m of
   EndRecover a                -> putWord8 16 >> put a
   RunTHDone                   -> putWord8 17
   AddModFinalizer a           -> putWord8 18 >> put a
-  AddForeignFile lang a       -> putWord8 19 >> put lang >> put a
+  AddForeignFilePath lang a   -> putWord8 19 >> put lang >> put a
   AddCorePlugin a             -> putWord8 20 >> put a
 
 

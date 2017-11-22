@@ -197,7 +197,7 @@ instance TH.Quasi GHCiQ where
   qAddDependentFile file = ghcCmd (AddDependentFile file)
   qAddTempFile suffix = ghcCmd (AddTempFile suffix)
   qAddTopDecls decls = ghcCmd (AddTopDecls decls)
-  qAddForeignFile lang fp = ghcCmd (AddForeignFile lang fp)
+  qAddForeignFilePath lang fp = ghcCmd (AddForeignFilePath lang fp)
   qAddModFinalizer fin = GHCiQ (\s -> mkRemoteRef fin >>= return . (, s)) >>=
                          ghcCmd . AddModFinalizer
   qAddCorePlugin str = ghcCmd (AddCorePlugin str)

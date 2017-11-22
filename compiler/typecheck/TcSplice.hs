@@ -917,7 +917,7 @@ instance TH.Quasi TcM where
           hang (text "The binder" <+> quotes (ppr name) <+> ptext (sLit "is not a NameU."))
              2 (text "Probable cause: you used mkName instead of newName to generate a binding.")
 
-  qAddForeignFile lang fp = do
+  qAddForeignFilePath lang fp = do
     var <- fmap tcg_th_foreign_files getGblEnv
     updTcRef var ((lang, fp) :)
 
@@ -1129,7 +1129,7 @@ handleTHMessage msg = case msg of
     wrapTHResult $ liftIO (mkFinalizedHValue hsc_env r) >>= addModFinalizerRef
   AddCorePlugin str -> wrapTHResult $ TH.qAddCorePlugin str
   AddTopDecls decs -> wrapTHResult $ TH.qAddTopDecls decs
-  AddForeignFile lang str -> wrapTHResult $ TH.qAddForeignFile lang str
+  AddForeignFilePath lang str -> wrapTHResult $ TH.qAddForeignFilePath lang str
   IsExtEnabled ext -> wrapTHResult $ TH.qIsExtEnabled ext
   ExtsEnabled -> wrapTHResult $ TH.qExtsEnabled
   _ -> panic ("handleTHMessage: unexpected message " ++ show msg)

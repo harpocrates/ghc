@@ -88,7 +88,7 @@ class (MonadIO m, Fail.MonadFail m) => Quasi m where
 
   qAddTopDecls :: [Dec] -> m ()
 
-  qAddForeignFile :: ForeignSrcLang -> String -> m ()
+  qAddForeignFilePath :: ForeignSrcLang -> String -> m ()
 
   qAddModFinalizer :: Q () -> m ()
 
@@ -132,7 +132,7 @@ instance Quasi IO where
   qAddDependentFile _   = badIO "addDependentFile"
   qAddTempFile _        = badIO "addTempFile"
   qAddTopDecls _        = badIO "addTopDecls"
-  qAddForeignFile _ _   = badIO "addForeignFile"
+  qAddForeignFilePath _ _ = badIO "addForeignFilePath"
   qAddModFinalizer _    = badIO "addModFinalizer"
   qAddCorePlugin _      = badIO "addCorePlugin"
   qGetQ                 = badIO "getQ"
@@ -485,7 +485,7 @@ addForeignSource lang src = do
                  RawObject -> "a"
   path <- addTempFile suffix
   runIO $ writeFile path src
-  addForeignFile lang path
+  addForeignFilePath lang path
 
 -- | Same as 'addForeignSource', but expects to recieve a path pointing to the
 -- foreign file instead of a 'String' of its contents. Consider using this in
@@ -493,8 +493,8 @@ addForeignSource lang src = do
 --
 -- This is a good alternative to 'addForeignSource' when you are trying to
 -- directly link in an object file.
-addForeignFile :: ForeignSrcLang -> FilePath -> Q ()
-addForeignFile lang fp = Q (qAddForeignFile lang fp)
+addForeignFilePath :: ForeignSrcLang -> FilePath -> Q ()
+addForeignFilePath lang fp = Q (qAddForeignFilePath lang fp)
 
 -- | Add a finalizer that will run in the Q monad after the current module has
 -- been type checked. This only makes sense when run within a top-level splice.
@@ -552,7 +552,7 @@ instance Quasi Q where
   qAddDependentFile   = addDependentFile
   qAddTempFile        = addTempFile
   qAddTopDecls        = addTopDecls
-  qAddForeignFile     = addForeignFile
+  qAddForeignFilePath = addForeignFilePath
   qAddModFinalizer    = addModFinalizer
   qAddCorePlugin      = addCorePlugin
   qGetQ               = getQ
