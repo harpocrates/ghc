@@ -4,7 +4,7 @@
 import Language.Haskell.TH.Syntax
 import System.IO (hFlush, stdout)
 
-foreign import ccall fc :: Int -> IO Int
+foreign import ccall foo :: Int -> IO Int
 
 do fpIn <- addTempFile "c"
    let cSrc = (unlines [ "#include <stdio.h>"
@@ -15,10 +15,10 @@ do fpIn <- addTempFile "c"
                        , "}"
                        ])
    runIO $ writeFile fpIn cSrc
-   addForeignFilePath LangC cSrc
+   addForeignFilePath LangC fpIn
    return []
 
 main :: IO ()
 main = do
-  fc 2 >>= print
+  foo 2 >>= print
   hFlush stdout
