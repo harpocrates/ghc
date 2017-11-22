@@ -459,7 +459,7 @@ addTopDecls :: [Dec] -> Q ()
 addTopDecls ds = Q (qAddTopDecls ds)
 
 -- | Emit a foreign file which will be compiled and linked to the object for
--- the current module. Currently only and languages that can be compiled with
+-- the current module. Currently only languages that can be compiled with
 -- the C compiler are supported, and the flags passed as part of -optc will
 -- be also applied to the C compiler invocation that will compile them.
 --
