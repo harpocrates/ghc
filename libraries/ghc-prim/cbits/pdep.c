@@ -1,9 +1,8 @@
 #include "Rts.h"
 #include "MachDeps.h"
 
-extern StgWord hs_pdep64(StgWord64 src, StgWord mask);
 StgWord
-hs_pdep64(StgWord src, StgWord mask)
+hs_pdep64(StgWord64 src, StgWord64 mask)
 {
   uint64_t result = 0;
 
