@@ -138,3 +138,6 @@
 [submodule "libraries/data-bitcode-edsl"]
 	path = libraries/data-bitcode-edsl
 	url = https://github.com/angerman/data-bitcode-edsl.git
+[submodule "hadrian"]
+	path = hadrian
+	url = https://github.com/snowleopard/hadrian.git
