@@ -301,7 +301,7 @@ compileOne' m_tc_result mHscMessage
 -- useful to implement facilities such as inline-c.
 
 compileForeign :: HscEnv -> ForeignSrcLang -> FilePath -> IO FilePath
-compileForeign hsc_env RawObject object_file = return object_file
+compileForeign _ RawObject object_file = return object_file
 compileForeign hsc_env lang stub_c = do
         let phase = case lang of
               LangC -> Cc
