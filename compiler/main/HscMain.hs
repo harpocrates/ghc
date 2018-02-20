@@ -827,7 +827,7 @@ batchMsg hsc_env mod_index recomp mod_summary =
 -- | Given a 'ModSummary', parses and typechecks it, returning the
 -- 'TcGblEnv' resulting from type-checking.
 hscFileFrontEnd :: ModSummary -> Hsc TcGblEnv
-hscFileFrontEnd mod_summary = hscTypecheck False mod_summary Nothing
+hscFileFrontEnd mod_summary = hscTypecheck True {- False -} mod_summary Nothing -- TODO: ALEC
 
 --------------------------------------------------------------
 -- Safe Haskell

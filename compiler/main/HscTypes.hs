@@ -141,7 +141,10 @@ module HscTypes (
 
         -- * COMPLETE signature
         CompleteMatch(..), CompleteMatchMap,
-        mkCompleteMatchMap, extendCompleteMatchMap
+        mkCompleteMatchMap, extendCompleteMatchMap,
+
+        -- * Doc strings
+        IfaceDoc, IfaceArg
     ) where
 
 #include "HsVersions.h"
@@ -551,7 +554,6 @@ type PackageIfaceTable = ModuleEnv ModIface
 -- | Constructs an empty HomePackageTable
 emptyHomePackageTable :: HomePackageTable
 emptyHomePackageTable  = emptyUDFM
-
 -- | Constructs an empty PackageIfaceTable
 emptyPackageIfaceTable :: PackageIfaceTable
 emptyPackageIfaceTable = emptyModuleEnv
@@ -964,8 +966,15 @@ data ModIface
                 -- itself) but imports some trustworthy modules from its own
                 -- package (which does require its own package be trusted).
                 -- See Note [RnNames . Trust Own Package]
-        mi_complete_sigs :: [IfaceCompleteMatch]
+        mi_complete_sigs :: [IfaceCompleteMatch],
+
+        mi_doc_map :: [IfaceDoc],
+        mi_arg_map :: [IfaceArg]
      }
+
+
+type IfaceDoc = (Name, [FastString])
+type IfaceArg = (Name, [(Int, FastString)])
 
 -- | Old-style accessor for whether or not the ModIface came from an hs-boot
 -- file.
@@ -1042,7 +1051,9 @@ instance Binary ModIface where
                  mi_hpc       = hpc_info,
                  mi_trust     = trust,
                  mi_trust_pkg = trust_pkg,
-                 mi_complete_sigs = complete_sigs }) = do
+                 mi_complete_sigs = complete_sigs,
+                 mi_doc_map   = doc_map,
+                 mi_arg_map   = arg_map }) = do
         put_ bh mod
         put_ bh sig_of
         put_ bh hsc_src
@@ -1071,6 +1082,8 @@ instance Binary ModIface where
         put_ bh trust
         put_ bh trust_pkg
         put_ bh complete_sigs
+        put_ bh doc_map
+        put_ bh arg_map
 
    get bh = do
         mod         <- get bh
@@ -1101,6 +1114,8 @@ instance Binary ModIface where
         trust       <- get bh
         trust_pkg   <- get bh
         complete_sigs <- get bh
+        doc_map     <- get bh
+        arg_map     <- get bh
         return (ModIface {
                  mi_module      = mod,
                  mi_sig_of      = sig_of,
@@ -1134,7 +1149,9 @@ instance Binary ModIface where
                  mi_warn_fn     = mkIfaceWarnCache warns,
                  mi_fix_fn      = mkIfaceFixCache fixities,
                  mi_hash_fn     = mkIfaceHashCache decls,
-                 mi_complete_sigs = complete_sigs })
+                 mi_complete_sigs = complete_sigs,
+                 mi_doc_map     = doc_map,
+                 mi_arg_map     = arg_map })
 
 -- | The original names declared of a certain module that are exported
 type IfaceExport = AvailInfo
@@ -1173,7 +1190,9 @@ emptyModIface mod
                mi_hpc         = False,
                mi_trust       = noIfaceTrustInfo,
                mi_trust_pkg   = False,
-               mi_complete_sigs = [] }
+               mi_complete_sigs = [],
+               mi_doc_map     = [],
+               mi_arg_map     = [] }
 
 
 -- | Constructs cache for the 'mi_hash_fn' field of a 'ModIface'
@@ -1302,9 +1321,12 @@ data ModGuts
                                                 -- one); c.f. 'tcg_fam_inst_env'
 
         mg_safe_haskell :: SafeHaskellMode,     -- ^ Safe Haskell mode
-        mg_trust_pkg    :: Bool                 -- ^ Do we need to trust our
+        mg_trust_pkg    :: Bool,                -- ^ Do we need to trust our
                                                 -- own package for Safe Haskell?
                                                 -- See Note [RnNames . Trust Own Package]
+
+        mg_doc_map      :: [IfaceDoc],  -- TODO ALEC
+        mg_arg_map      :: [IfaceArg]   -- TODO ALEC
     }
 
 -- The ModGuts takes on several slightly different forms:

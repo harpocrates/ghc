@@ -700,7 +700,10 @@ data TcGblEnv
         tcg_static_wc :: TcRef WantedConstraints,
           -- ^ Wanted constraints of static forms.
         -- See Note [Constraints in static forms].
-        tcg_complete_matches :: [CompleteMatch]
+        tcg_complete_matches :: [CompleteMatch],
+
+        tcg_doc_map :: [IfaceDoc],
+        tcg_arg_map :: [IfaceArg]
     }
 
 -- NB: topModIdentity, not topModSemantic!

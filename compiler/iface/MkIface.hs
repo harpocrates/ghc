@@ -147,12 +147,14 @@ mkIface hsc_env maybe_old_fingerprint mod_details
                       mg_warns        = warns,
                       mg_hpc_info     = hpc_info,
                       mg_safe_haskell = safe_mode,
-                      mg_trust_pkg    = self_trust
+                      mg_trust_pkg    = self_trust,
+                      mg_doc_map      = doc_map,
+                      mg_arg_map      = arg_map
                     }
         = mkIface_ hsc_env maybe_old_fingerprint
                    this_mod hsc_src used_th deps rdr_env fix_env
                    warns hpc_info self_trust
-                   safe_mode usages mod_details
+                   safe_mode usages doc_map arg_map mod_details
 
 -- | make an interface from the results of typechecking only.  Useful
 -- for non-optimising compilation, or where we aren't generating any
@@ -173,7 +175,9 @@ mkIfaceTc hsc_env maybe_old_fingerprint safe_mode mod_details
                       tcg_warns = warns,
                       tcg_hpc = other_hpc_info,
                       tcg_th_splice_used = tc_splice_used,
-                      tcg_dependent_files = dependent_files
+                      tcg_dependent_files = dependent_files,
+                      tcg_doc_map = doc_map,
+                      tcg_arg_map = arg_map
                     }
   = do
           let used_names = mkUsedNames tc_result
@@ -193,7 +197,8 @@ mkIfaceTc hsc_env maybe_old_fingerprint safe_mode mod_details
                    this_mod hsc_src
                    used_th deps rdr_env
                    fix_env warns hpc_info
-                   (imp_trust_own_pkg imports) safe_mode usages mod_details
+                   (imp_trust_own_pkg imports) safe_mode usages doc_map arg_map
+                   mod_details
 
 
 mkIface_ :: HscEnv -> Maybe Fingerprint -> Module -> HscSource
@@ -201,12 +206,12 @@ mkIface_ :: HscEnv -> Maybe Fingerprint -> Module -> HscSource
          -> NameEnv FixItem -> Warnings -> HpcInfo
          -> Bool
          -> SafeHaskellMode
-         -> [Usage]
+         -> [Usage] -> [IfaceDoc] -> [IfaceArg]
          -> ModDetails
          -> IO (ModIface, Bool)
 mkIface_ hsc_env maybe_old_fingerprint
          this_mod hsc_src used_th deps rdr_env fix_env src_warns
-         hpc_info pkg_trust_req safe_mode usages
+         hpc_info pkg_trust_req safe_mode usages doc_map arg_map
          ModDetails{  md_insts     = insts,
                       md_fam_insts = fam_insts,
                       md_rules     = rules,
@@ -297,7 +302,9 @@ mkIface_ hsc_env maybe_old_fingerprint
               -- And build the cached values
               mi_warn_fn     = mkIfaceWarnCache warns,
               mi_fix_fn      = mkIfaceFixCache fixities,
-              mi_complete_sigs = icomplete_sigs }
+              mi_complete_sigs = icomplete_sigs,
+              mi_doc_map     = doc_map,
+              mi_arg_map     = arg_map }
 
     (new_iface, no_change_at_all)
           <- {-# SCC "versioninfo" #-}

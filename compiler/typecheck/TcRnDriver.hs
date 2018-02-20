@@ -137,6 +137,10 @@ import qualified Data.Set as S
 
 import Control.Monad
 
+import Data.Map (Map)
+import qualified Data.Map as M
+import Data.Coerce
+
 #include "HsVersions.h"
 
 {-
@@ -263,6 +267,7 @@ tcRnModuleTcRnM hsc_env hsc_src
         tcg_env <- tcRnExports explicit_mod_hdr export_ies tcg_env ;
         traceRn "rn4b: after exports" empty ;
 
+
                 -- Check that main is exported (must be after tcRnExports)
         checkMainExported tcg_env ;
 
@@ -279,6 +284,17 @@ tcRnModuleTcRnM hsc_env hsc_src
                 -- Don't need to rename the Haddock documentation,
                 -- it's not parsed by GHC anymore.
         tcg_env <- return (tcg_env { tcg_doc_hdr = maybe_doc_hdr }) ;
+
+
+                -- Process documentation
+        let { sem_mdl = tcg_semantic_mod tcg_env
+            ; instances = instEnvElts (tcg_inst_env tcg_env)
+            ; fam_instances = famInstEnvElts (tcg_fam_inst_env tcg_env)
+            ; local_insts = filter (nameIsLocalOrFrom sem_mdl)
+                              $  map getName instances
+                              ++ map getName fam_instances
+            } ;
+        tcg_env <- return (tcRnAttachDocs local_insts tcg_env) ;
 
                 -- Report unused names
                 -- Do this /after/ type inference, so that when reporting
@@ -554,6 +570,228 @@ tc_rn_src_decls ds
                }
           }
       }
+
+{-
+************************************************************************
+*                                                                      *
+        Collect docs
+*                                                                      *
+************************************************************************
+-}
+
+tcRnAttachDocs :: [Name] -> TcGblEnv -> TcGblEnv
+tcRnAttachDocs _         env@TcGblEnv{ tcg_rn_decls = Nothing } = env
+tcRnAttachDocs instances env@TcGblEnv{ tcg_rn_decls = Just group }
+    = env { tcg_doc_map = coerce docMap
+          , tcg_arg_map = coerce argMap
+          }
+  where (docMap, argMap, _, _) = mkMaps instances group
+
+-- | The top-level declarations of a module that we care about,
+-- ordered by source location, with documentation attached if it exists.
+mkMaps :: [Name]
+       -> HsGroup GhcRn
+       -> ( [(Name, [HsDocString])]        -- name of decl, docs attached to it
+          , [(Name, [(Int, HsDocString)])] -- name of decl, argument docs attached to it
+          , [(Name, [Name])]               -- name of decl, subdecls of the decl
+          , Map SrcSpan Name               -- location of instance, instance name
+          )
+mkMaps instances group =
+  let (a, b, c) = unzip3 $ map mappings decls
+  in ( concat $ filterMapping (not . null) a
+     , concat $ filterMapping (not . null) b
+     , concat $ filterMapping (not . null) c
+     , instanceMap
+     )
+
+  where
+
+    filterMapping :: (b -> Bool) ->  [[(a, b)]] -> [[(a, b)]]
+    filterMapping p = map (filter (p . snd))
+
+    instanceMap :: Map SrcSpan Name
+    instanceMap = M.fromList [ (getSrcSpan n, n) | n <- instances ]
+
+    names :: SrcSpan -> HsDecl GhcRn -> [Name]
+    names l (InstD d) = maybeToList (M.lookup loc instanceMap) -- See note [2].
+      where loc = case d of
+              TyFamInstD _ -> l -- The CoAx's loc is the whole line, but only for TFs
+              _ -> getInstLoc d
+    names l (DerivD {}) = maybeToList (M.lookup l instanceMap) -- See note [2].
+    names _ decl = getMainDeclBinder decl
+    
+    decls :: [(LHsDecl GhcRn, [HsDocString])]
+    decls = collectDocs . ungroup $ group
+
+    -- TODO seqList stuff (see Haddock's mkMaps)
+    mappings :: (LHsDecl GhcRn, [HsDocString]) -> ( [(Name, [HsDocString])]
+                                                 , [(Name, [(Int, HsDocString)])]
+                                                 , [(Name, [Name])]
+                                                 )
+    mappings (L l decl, docStrs) =
+      let args = typeDocs decl
+          subs = subordinates instanceMap decl
+
+          ns = names l decl
+          subNs = [ n | (n,_,_) <- subs ]
+      in ( [ (n, docStrs) | n <- ns ] ++ [ (n, ds) | (n, ds, _) <- subs ]
+         , [ (n, args)    | n <- ns ] ++ [ (n, as) | (n, _, as) <- subs ]
+         , [ (n, subNs)   | n <- ns ]
+         )
+
+-- | Get all subordinate declarations inside a declaration, and their docs.
+-- A subordinate declaration is something like the associate type or data
+-- family of a type class.
+subordinates :: Map SrcSpan Name
+             -> HsDecl GhcRn
+             -> [(Name, [HsDocString], [(Int, HsDocString)])]
+subordinates instMap decl = case decl of
+  InstD (ClsInstD d) -> do
+    DataFamInstDecl { dfid_eqn = HsIB { hsib_body =
+      FamEqn { feqn_tycon = L l _
+             , feqn_rhs   = defn }}} <- unLoc <$> cid_datafam_insts d
+    [ (n, [], []) | Just n <- [M.lookup l instMap] ] ++ dataSubs defn
+
+  InstD (DataFamInstD (DataFamInstDecl (HsIB { hsib_body = d })))
+    -> dataSubs (feqn_rhs d)
+  TyClD d | isClassDecl d -> classSubs d
+          | isDataDecl  d -> dataSubs (tcdDataDefn d)
+  _ -> []
+  where
+    classSubs dd = [ (name, doc, typeDocs d) | (L _ d, doc) <- classDecls dd
+                   , name <- getMainDeclBinder d, not (isValD d)
+                   ]
+    dataSubs :: HsDataDefn GhcRn -> [(Name, [HsDocString], [(Int, HsDocString)])]
+    dataSubs dd = constrs ++ fields ++ derivs
+      where
+        cons = map unLoc $ (dd_cons dd)
+        constrs = [ (unLoc cname, maybeToList $ fmap unLoc $ con_doc c, [])
+                  | c <- cons, cname <- getConNames c ]
+        fields  = [ (selectorFieldOcc n, maybeToList $ fmap unLoc doc, [])
+                  | RecCon flds <- map getConDetails cons
+                  , L _ (ConDeclField ns _ doc) <- (unLoc flds)
+                  , L _ n <- ns ]
+        derivs  = [ (instName, [unLoc doc], [])
+                  | HsIB { hsib_body = L l (HsDocTy _ doc) }
+                      <- concatMap (unLoc . deriv_clause_tys . unLoc) $
+                           unLoc $ dd_derivs dd
+                  , Just instName <- [M.lookup l instMap] ]
+       
+-- | Extract function argument docs from inside types.
+typeDocs :: HsDecl GhcRn -> [(Int,HsDocString)]
+typeDocs d =
+  let docs = go 0 in
+  case d of
+    SigD (TypeSig _ ty)             -> docs (unLoc (hsSigWcType ty))
+    SigD (ClassOpSig _ _ ty)        -> docs (unLoc (hsSigType ty))
+    SigD (PatSynSig _ ty)           -> docs (unLoc (hsSigType ty))
+    ForD (ForeignImport _ ty _ _)   -> docs (unLoc (hsSigType ty))
+    TyClD (SynDecl { tcdRhs = ty }) -> docs (unLoc ty)
+    _ -> []
+  where
+    go n (HsForAllTy { hst_body = ty }) = go n (unLoc ty)
+    go n (HsQualTy   { hst_body = ty }) = go n (unLoc ty)
+    go n (HsFunTy (L _ (HsDocTy _ (L _ x))) (L _ ty)) = (n,x) : go (n+1) ty
+    go n (HsFunTy _ ty) = go (n+1) (unLoc ty)
+    go n (HsDocTy _ (L _ doc)) = [(n,doc)]
+    go _ _ = []
+
+-- | All the sub declarations of a class (that we handle), ordered by
+-- source location, with documentation attached if it exists.
+classDecls :: TyClDecl GhcRn -> [(LHsDecl GhcRn, [HsDocString])]
+classDecls class_ = collectDocs . sortByLoc $ decls
+  where
+    decls = docs ++ defs ++ sigs ++ ats
+    docs  = mkDecls tcdDocs DocD class_
+    defs  = mkDecls (bagToList . tcdMeths) ValD class_
+    sigs  = mkDecls tcdSigs SigD class_
+    ats   = mkDecls tcdATs (TyClD . FamDecl) class_
+
+-- | Take all declarations except pragmas, infix decls, rules from an 'HsGroup'
+ungroup :: HsGroup GhcRn -> [LHsDecl GhcRn]
+ungroup group_ = 
+  mkDecls (tyClGroupTyClDecls . hs_tyclds) TyClD  group_ ++
+  mkDecls hs_derivds             DerivD group_ ++
+  mkDecls hs_defds               DefD   group_ ++
+  mkDecls hs_fords               ForD   group_ ++
+  mkDecls hs_docs                DocD   group_ ++
+  mkDecls (tyClGroupInstDecls . hs_tyclds) InstD  group_ ++
+  mkDecls (typesigs . hs_valds)  SigD   group_ ++
+  mkDecls (valbinds . hs_valds)  ValD   group_
+  where
+    typesigs (ValBindsOut _ sigs) = filter isUserLSig sigs
+    typesigs _ = error "expected ValBindsOut"
+
+    valbinds (ValBindsOut binds _) = concatMap bagToList . snd . unzip $ binds
+    valbinds _ = error "expected ValBindsOut"
+
+-- | Was this signature given by the user?
+isUserLSig :: LSig name -> Bool
+isUserLSig (L _(TypeSig {}))    = True
+isUserLSig (L _(ClassOpSig {})) = True
+isUserLSig (L _(PatSynSig {}))  = True
+isUserLSig _                    = False
+
+isValD :: HsDecl a -> Bool
+isValD (ValD _) = True
+isValD _ = False
+
+getMainDeclBinder :: HsDecl name -> [IdP name]
+getMainDeclBinder (TyClD d) = [tcdName d]
+getMainDeclBinder (ValD d) =
+  case collectHsBindBinders d of
+      []       -> []
+      (name:_) -> [name]
+getMainDeclBinder (SigD d) = sigNameNoLoc d
+getMainDeclBinder (ForD (ForeignImport name _ _ _)) = [unLoc name]
+getMainDeclBinder (ForD (ForeignExport _ _ _ _)) = []
+getMainDeclBinder _ = []
+
+sigNameNoLoc :: Sig name -> [IdP name]
+sigNameNoLoc (TypeSig      ns _)       = map unLoc ns
+sigNameNoLoc (ClassOpSig _ ns _)       = map unLoc ns
+sigNameNoLoc (PatSynSig    ns _)       = map unLoc ns
+sigNameNoLoc (SpecSig      n _ _)      = [unLoc n]
+sigNameNoLoc (InlineSig    n _)        = [unLoc n]
+sigNameNoLoc (FixSig (FixitySig ns _)) = map unLoc ns
+sigNameNoLoc _                         = []
+
+-- Extract the source location where an instance is defined. This is used
+-- to correlate InstDecls with their Instance/CoAxiom Names, via the
+-- instanceMap
+getInstLoc :: InstDecl name -> SrcSpan
+getInstLoc (ClsInstD (ClsInstDecl { cid_poly_ty = ty })) = getLoc (hsSigType ty)
+getInstLoc (DataFamInstD (DataFamInstDecl
+  { dfid_eqn = HsIB { hsib_body = FamEqn { feqn_tycon = L l _ }}})) = l
+getInstLoc (TyFamInstD (TyFamInstDecl
+  -- Since CoAxioms' Names refer to the whole line for type family instances
+  -- in particular, we need to dig a bit deeper to pull out the entire
+  -- equation. This does not happen for data family instances, for some reason.
+  { tfid_eqn = HsIB { hsib_body = FamEqn { feqn_rhs = L l _ }}})) = l
+
+-- | Sort by source location
+sortByLoc :: [Located a] -> [Located a]
+sortByLoc = sortBy (comparing getLoc)
+
+-- | Take a field of declarations from a data structure and create HsDecls
+-- using the given constructor
+mkDecls :: (a -> [Located b]) -> (b -> c) -> a -> [Located c]
+mkDecls field con struct = [ L loc (con decl) | L loc decl <- field struct ]
+
+-- | Collect docs and attach them to the right declarations.
+collectDocs :: [LHsDecl a] -> [(LHsDecl a, [HsDocString])]
+collectDocs = go Nothing []
+  where
+    go Nothing _ [] = []
+    go (Just prev) docs [] = finished prev docs []
+    go prev docs (L _ (DocD (DocCommentNext str)) : ds)
+      | Nothing <- prev = go Nothing (str:docs) ds
+      | Just decl <- prev = finished decl docs (go Nothing [str] ds)
+    go prev docs (L _ (DocD (DocCommentPrev str)) : ds) = go prev (str:docs) ds
+    go Nothing docs (d:ds) = go (Just d) docs ds
+    go (Just prev) docs (d:ds) = finished prev docs (go (Just d) [] ds)
+
+    finished decl docs rest = (decl, reverse docs) : rest 
 
 {-
 ************************************************************************
