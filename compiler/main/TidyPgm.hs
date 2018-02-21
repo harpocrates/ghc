@@ -144,7 +144,8 @@ mkBootModDetailsTc hsc_env
                   tcg_patsyns   = pat_syns,
                   tcg_insts     = insts,
                   tcg_fam_insts = fam_insts,
-                  tcg_mod       = this_mod
+                  tcg_mod       = this_mod,
+                  tcg_doc_env   = docs
                 }
   = -- This timing isn't terribly useful since the result isn't forced, but
     -- the message is useful to locating oneself in the compilation process.
@@ -167,6 +168,7 @@ mkBootModDetailsTc hsc_env
                              , md_exports   = exports
                              , md_vect_info = noVectInfo
                              , md_complete_sigs = []
+                             , md_docs      = docs
                              })
         }
   where
@@ -328,6 +330,7 @@ tidyProgram hsc_env  (ModGuts { mg_module    = mod
                               , mg_foreign_files = foreign_files
                               , mg_hpc_info  = hpc_info
                               , mg_modBreaks = modBreaks
+                              , mg_doc_env   = docs
                               })
 
   = Err.withTiming (pure dflags)
@@ -444,7 +447,8 @@ tidyProgram hsc_env  (ModGuts { mg_module    = mod
                                 md_fam_insts = fam_insts,
                                 md_exports   = exports,
                                 md_anns      = anns,      -- are already tidy
-                                md_complete_sigs = complete_sigs
+                                md_complete_sigs = complete_sigs,
+                                md_docs      = docs
                               })
         }
   where

@@ -182,6 +182,9 @@ typecheckIface iface
                 -- Complete Sigs
         ; complete_sigs <- tcIfaceCompleteSigs (mi_complete_sigs iface)
 
+                -- Docs
+        ; docs <- tcIfaceDocs (mi_docs iface)
+
                 -- Finished
         ; traceIf (vcat [text "Finished typechecking interface for" <+> ppr (mi_module iface),
                          -- Careful! If we tug on the TyThing thunks too early
@@ -196,6 +199,7 @@ typecheckIface iface
                               , md_vect_info = vect_info
                               , md_exports   = exports
                               , md_complete_sigs = complete_sigs
+                              , md_docs      = docs
                               }
     }
 
@@ -396,6 +400,7 @@ typecheckIfacesForMerging mod ifaces tc_env_var =
         vect_info <- tcIfaceVectInfo (mi_semantic_module iface) type_env (mi_vect_info iface)
         exports   <- ifaceExportNames (mi_exports iface)
         complete_sigs <- tcIfaceCompleteSigs (mi_complete_sigs iface)
+        docs      <- tcIfaceDocs (mi_docs iface)
         return $ ModDetails { md_types     = type_env
                             , md_insts     = insts
                             , md_fam_insts = fam_insts
@@ -404,6 +409,7 @@ typecheckIfacesForMerging mod ifaces tc_env_var =
                             , md_vect_info = vect_info
                             , md_exports   = exports
                             , md_complete_sigs = complete_sigs
+                            , md_docs      = docs
                             }
     return (global_type_env, details)
 
@@ -437,6 +443,7 @@ typecheckIfaceForInstantiate nsubst iface =
     vect_info <- tcIfaceVectInfo (mi_semantic_module iface) type_env (mi_vect_info iface)
     exports   <- ifaceExportNames (mi_exports iface)
     complete_sigs <- tcIfaceCompleteSigs (mi_complete_sigs iface)
+    docs      <- tcIfaceDocs (mi_docs iface)
     return $ ModDetails { md_types     = type_env
                         , md_insts     = insts
                         , md_fam_insts = fam_insts
@@ -445,6 +452,7 @@ typecheckIfaceForInstantiate nsubst iface =
                         , md_vect_info = vect_info
                         , md_exports   = exports
                         , md_complete_sigs = complete_sigs
+                        , md_docs      = docs
                         }
 
 -- Note [Resolving never-exported Names in TcIface]
@@ -1110,6 +1118,24 @@ tcIfaceAnnTarget (NamedTarget occ) = do
     return $ NamedTarget name
 tcIfaceAnnTarget (ModuleTarget mod) = do
     return $ ModuleTarget mod
+
+{-
+************************************************************************
+*                                                                      *
+                Docs
+*                                                                      *
+************************************************************************
+-}
+
+tcIfaceDocs :: [(OccName,Docs)] -> IfL DocEnv
+tcIfaceDocs = fmap mkNameEnv . mapM tcIfaceDoc
+
+tcIfaceDoc :: (OccName, Docs) -> IfL (Name, DocItem)
+tcIfaceDoc (occ, docs)
+  = do { n <- lookupIfaceTop occ
+       ; return (n, DocItem occ docs)
+       }
+
 
 {-
 ************************************************************************

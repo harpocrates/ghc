@@ -702,8 +702,7 @@ data TcGblEnv
         -- See Note [Constraints in static forms].
         tcg_complete_matches :: [CompleteMatch],
 
-        tcg_doc_map :: [IfaceDoc],
-        tcg_arg_map :: [IfaceArg]
+        tcg_doc_env :: DocEnv
     }
 
 -- NB: topModIdentity, not topModSemantic!

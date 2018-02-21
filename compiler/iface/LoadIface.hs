@@ -1041,9 +1041,7 @@ pprModIface iface
         , pprTrustPkg (mi_trust_pkg iface)
         , vcat (map ppr (mi_complete_sigs iface))
         , text "doc map:"
-        , vcat [ ppr n <> text ":" <+> ppr d | (n,ds) <- mi_doc_map iface, d <- ds ]
-        , text "arg map:"
-        , vcat [ ppr n <+> ppr i <> text ":" <+> ppr d | (n,as) <- mi_arg_map iface, (i,d) <- as ]
+        , nest 2 $ vcat [ ppr n <> text ":" $$ nest 2 (ppr docs) | (n, docs) <- mi_docs iface ]
         ]
   where
     pp_hsc_src HsBootFile = text "[boot]"

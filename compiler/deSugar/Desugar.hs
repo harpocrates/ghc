@@ -110,8 +110,7 @@ deSugar hsc_env
                             tcg_fam_insts    = fam_insts,
                             tcg_hpc          = other_hpc_info,
                             tcg_complete_matches = complete_matches,
-                            tcg_doc_map      = doc_map,
-                            tcg_arg_map      = arg_map
+                            tcg_doc_env      = doc_env
                             })
 
   = do { let dflags = hsc_dflags hsc_env
@@ -217,8 +216,7 @@ deSugar hsc_env
                 mg_safe_haskell = safe_mode,
                 mg_trust_pkg    = imp_trust_own_pkg imports,
                 mg_complete_sigs = complete_matches,
-                mg_doc_map      = doc_map,
-                mg_arg_map      = arg_map
+                mg_doc_env      = doc_env
               }
         ; return (msgs, Just mod_guts)
         }}}}

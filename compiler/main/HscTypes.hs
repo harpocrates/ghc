@@ -144,7 +144,7 @@ module HscTypes (
         mkCompleteMatchMap, extendCompleteMatchMap,
 
         -- * Doc strings
-        IfaceDoc, IfaceArg
+        DocEnv, DocItem(..), Docs(..), emptyDocEnv
     ) where
 
 #include "HsVersions.h"
@@ -907,6 +907,9 @@ data ModIface
                 -- ^ Annotations
                 -- NOT STRICT!  we read this field lazily from the interface file
 
+        mi_docs     :: [(OccName,Docs)],
+                -- ^ Documentation
+                -- NOT STRICT!  we read this field lazily from the interface file
 
         mi_decls    :: [(Fingerprint,IfaceDecl)],
                 -- ^ Type, class and variable declarations
@@ -923,7 +926,7 @@ data ModIface
                 -- defined by the user).  Used for GHCi and for inspecting
                 -- the contents of modules via the GHC API only.
                 --
-                -- (We need the source file to figure out the
+                -- (We need the source fil`e to figure out the
                 -- top-level environment, if we didn't compile this module
                 -- from source then this field contains @Nothing@).
                 --
@@ -966,15 +969,9 @@ data ModIface
                 -- itself) but imports some trustworthy modules from its own
                 -- package (which does require its own package be trusted).
                 -- See Note [RnNames . Trust Own Package]
-        mi_complete_sigs :: [IfaceCompleteMatch],
-
-        mi_doc_map :: [IfaceDoc],
-        mi_arg_map :: [IfaceArg]
+        mi_complete_sigs :: [IfaceCompleteMatch]
      }
 
-
-type IfaceDoc = (Name, [FastString])
-type IfaceArg = (Name, [(Int, FastString)])
 
 -- | Old-style accessor for whether or not the ModIface came from an hs-boot
 -- file.
@@ -1052,8 +1049,7 @@ instance Binary ModIface where
                  mi_trust     = trust,
                  mi_trust_pkg = trust_pkg,
                  mi_complete_sigs = complete_sigs,
-                 mi_doc_map   = doc_map,
-                 mi_arg_map   = arg_map }) = do
+                 mi_docs      = docs }) = do
         put_ bh mod
         put_ bh sig_of
         put_ bh hsc_src
@@ -1082,8 +1078,7 @@ instance Binary ModIface where
         put_ bh trust
         put_ bh trust_pkg
         put_ bh complete_sigs
-        put_ bh doc_map
-        put_ bh arg_map
+        put_ bh docs
 
    get bh = do
         mod         <- get bh
@@ -1114,8 +1109,7 @@ instance Binary ModIface where
         trust       <- get bh
         trust_pkg   <- get bh
         complete_sigs <- get bh
-        doc_map     <- get bh
-        arg_map     <- get bh
+        docs        <- get bh
         return (ModIface {
                  mi_module      = mod,
                  mi_sig_of      = sig_of,
@@ -1150,8 +1144,7 @@ instance Binary ModIface where
                  mi_fix_fn      = mkIfaceFixCache fixities,
                  mi_hash_fn     = mkIfaceHashCache decls,
                  mi_complete_sigs = complete_sigs,
-                 mi_doc_map     = doc_map,
-                 mi_arg_map     = arg_map })
+                 mi_docs        = docs })
 
 -- | The original names declared of a certain module that are exported
 type IfaceExport = AvailInfo
@@ -1191,8 +1184,7 @@ emptyModIface mod
                mi_trust       = noIfaceTrustInfo,
                mi_trust_pkg   = False,
                mi_complete_sigs = [],
-               mi_doc_map     = [],
-               mi_arg_map     = [] }
+               mi_docs        = [] }
 
 
 -- | Constructs cache for the 'mi_hash_fn' field of a 'ModIface'
@@ -1225,8 +1217,9 @@ data ModDetails
         md_anns      :: ![Annotation],  -- ^ Annotations present in this module: currently
                                         -- they only annotate things also declared in this module
         md_vect_info :: !VectInfo,       -- ^ Module vectorisation information
-        md_complete_sigs :: [CompleteMatch]
+        md_complete_sigs :: [CompleteMatch],
           -- ^ Complete match pragmas for this module
+        md_docs      :: !DocEnv
      }
 
 -- | Constructs an empty ModDetails
@@ -1239,7 +1232,8 @@ emptyModDetails
                  md_fam_insts = [],
                  md_anns      = [],
                  md_vect_info = noVectInfo,
-                 md_complete_sigs = [] }
+                 md_complete_sigs = [],
+                 md_docs      = emptyDocEnv }
 
 -- | Records the modules directly imported by a module for extracting e.g.
 -- usage information, and also to give better error message
@@ -1325,8 +1319,7 @@ data ModGuts
                                                 -- own package for Safe Haskell?
                                                 -- See Note [RnNames . Trust Own Package]
 
-        mg_doc_map      :: [IfaceDoc],  -- TODO ALEC
-        mg_arg_map      :: [IfaceArg]   -- TODO ALEC
+        mg_doc_env      :: !DocEnv              -- TODO ALEC
     }
 
 -- The ModGuts takes on several slightly different forms:
@@ -2307,6 +2300,32 @@ lookupFixity :: FixityEnv -> Name -> Fixity
 lookupFixity env n = case lookupNameEnv env n of
                         Just (FixItem _ fix) -> fix
                         Nothing         -> defaultFixity
+
+-- | Doc environment mapping names to their documentation
+type DocEnv = NameEnv DocItem
+
+-- | TODO ALEC docs
+data DocItem = DocItem OccName Docs
+
+data Docs = Docs
+  [FastString]        -- the docstrings attached to this name
+  [(Int, FastString)] -- the argument docstrings attached to this name
+
+emptyDocEnv :: DocEnv
+emptyDocEnv = emptyNameEnv
+
+instance Binary Docs where
+  put_ bh (Docs ds as) = do
+    put_ bh ds
+    put_ bh as
+  get bh = do
+    ds <- get bh
+    as <- get bh
+    return (Docs ds as)
+
+instance Outputable Docs where
+  ppr (Docs ds as) = vcat (map ppr ds ++ map ppr as)
+
 
 {-
 ************************************************************************

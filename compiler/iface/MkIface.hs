@@ -148,13 +148,12 @@ mkIface hsc_env maybe_old_fingerprint mod_details
                       mg_hpc_info     = hpc_info,
                       mg_safe_haskell = safe_mode,
                       mg_trust_pkg    = self_trust,
-                      mg_doc_map      = doc_map,
-                      mg_arg_map      = arg_map
+                      mg_doc_env      = doc_env
                     }
         = mkIface_ hsc_env maybe_old_fingerprint
-                   this_mod hsc_src used_th deps rdr_env fix_env
+                   this_mod hsc_src used_th deps rdr_env fix_env doc_env
                    warns hpc_info self_trust
-                   safe_mode usages doc_map arg_map mod_details
+                   safe_mode usages mod_details
 
 -- | make an interface from the results of typechecking only.  Useful
 -- for non-optimising compilation, or where we aren't generating any
@@ -176,8 +175,7 @@ mkIfaceTc hsc_env maybe_old_fingerprint safe_mode mod_details
                       tcg_hpc = other_hpc_info,
                       tcg_th_splice_used = tc_splice_used,
                       tcg_dependent_files = dependent_files,
-                      tcg_doc_map = doc_map,
-                      tcg_arg_map = arg_map
+                      tcg_doc_env = doc_env
                     }
   = do
           let used_names = mkUsedNames tc_result
@@ -196,22 +194,22 @@ mkIfaceTc hsc_env maybe_old_fingerprint safe_mode mod_details
           mkIface_ hsc_env maybe_old_fingerprint
                    this_mod hsc_src
                    used_th deps rdr_env
-                   fix_env warns hpc_info
-                   (imp_trust_own_pkg imports) safe_mode usages doc_map arg_map
+                   fix_env doc_env warns hpc_info
+                   (imp_trust_own_pkg imports) safe_mode usages
                    mod_details
 
 
 mkIface_ :: HscEnv -> Maybe Fingerprint -> Module -> HscSource
          -> Bool -> Dependencies -> GlobalRdrEnv
-         -> NameEnv FixItem -> Warnings -> HpcInfo
+         -> NameEnv FixItem -> NameEnv DocItem -> Warnings -> HpcInfo
          -> Bool
          -> SafeHaskellMode
-         -> [Usage] -> [IfaceDoc] -> [IfaceArg]
+         -> [Usage]
          -> ModDetails
          -> IO (ModIface, Bool)
 mkIface_ hsc_env maybe_old_fingerprint
-         this_mod hsc_src used_th deps rdr_env fix_env src_warns
-         hpc_info pkg_trust_req safe_mode usages doc_map arg_map
+         this_mod hsc_src used_th deps rdr_env fix_env doc_env src_warns
+         hpc_info pkg_trust_req safe_mode usages
          ModDetails{  md_insts     = insts,
                       md_fam_insts = fam_insts,
                       md_rules     = rules,
@@ -247,6 +245,8 @@ mkIface_ hsc_env maybe_old_fingerprint
           -- The order of fixities returned from nameEnvElts is not
           -- deterministic, so we sort by OccName to canonicalize it.
           -- See Note [Deterministic UniqFM] in UniqDFM for more details.
+        docs        = sortBy (comparing fst)
+          [(occ,fix) | DocItem occ fix <- nameEnvElts doc_env] -- TODO ALEC same comment as fixities
         warns       = src_warns
         iface_rules = map coreRuleToIfaceRule rules
         iface_insts = map instanceToIfaceInst $ fixSafeInstances safe_mode insts
@@ -303,8 +303,7 @@ mkIface_ hsc_env maybe_old_fingerprint
               mi_warn_fn     = mkIfaceWarnCache warns,
               mi_fix_fn      = mkIfaceFixCache fixities,
               mi_complete_sigs = icomplete_sigs,
-              mi_doc_map     = doc_map,
-              mi_arg_map     = arg_map }
+              mi_docs        = docs }
 
     (new_iface, no_change_at_all)
           <- {-# SCC "versioninfo" #-}

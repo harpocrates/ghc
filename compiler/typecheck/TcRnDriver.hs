@@ -582,32 +582,25 @@ tc_rn_src_decls ds
 tcRnAttachDocs :: [Name] -> TcGblEnv -> TcGblEnv
 tcRnAttachDocs _         env@TcGblEnv{ tcg_rn_decls = Nothing } = env
 tcRnAttachDocs instances env@TcGblEnv{ tcg_rn_decls = Just group }
-    = env { tcg_doc_map = coerce docMap
-          , tcg_arg_map = coerce argMap
-          }
-  where (docMap, argMap, _, _) = mkMaps instances group
+    = env { tcg_doc_env = mkNameEnv docs }
+  where (docs, _, _) = mkMaps instances group
 
 -- | The top-level declarations of a module that we care about,
 -- ordered by source location, with documentation attached if it exists.
 mkMaps :: [Name]
        -> HsGroup GhcRn
-       -> ( [(Name, [HsDocString])]        -- name of decl, docs attached to it
-          , [(Name, [(Int, HsDocString)])] -- name of decl, argument docs attached to it
-          , [(Name, [Name])]               -- name of decl, subdecls of the decl
-          , Map SrcSpan Name               -- location of instance, instance name
+       -> ( [(Name, DocItem)]   -- name of decl, docs and arg docs attached to it
+          , [(Name, [Name])]    -- name of decl, subdecls of the decl
+          , Map SrcSpan Name    -- location of instance, instance name
           )
 mkMaps instances group =
-  let (a, b, c) = unzip3 $ map mappings decls
-  in ( concat $ filterMapping (not . null) a
-     , concat $ filterMapping (not . null) b
-     , concat $ filterMapping (not . null) c
+  let (docs, subs) = unzip $ map mappings decls
+  in ( concat docs
+     , concat subs
      , instanceMap
      )
 
   where
-
-    filterMapping :: (b -> Bool) ->  [[(a, b)]] -> [[(a, b)]]
-    filterMapping p = map (filter (p . snd))
 
     instanceMap :: Map SrcSpan Name
     instanceMap = M.fromList [ (getSrcSpan n, n) | n <- instances ]
@@ -623,20 +616,31 @@ mkMaps instances group =
     decls :: [(LHsDecl GhcRn, [HsDocString])]
     decls = collectDocs . ungroup $ group
 
+    mkDocItemPair :: Name -> [HsDocString] -> [(Int, HsDocString)] -> (Name, DocItem)
+    mkDocItemPair n ds as = (n, DocItem (nameOccName n) (Docs (coerce ds) (coerce as)))
+
     -- TODO seqList stuff (see Haddock's mkMaps)
-    mappings :: (LHsDecl GhcRn, [HsDocString]) -> ( [(Name, [HsDocString])]
-                                                 , [(Name, [(Int, HsDocString)])]
-                                                 , [(Name, [Name])]
-                                                 )
+    mappings :: (LHsDecl GhcRn, [HsDocString]) -> ( [(Name, DocItem)]
+                                                  , [(Name, [Name])]
+                                                  )
     mappings (L l decl, docStrs) =
       let args = typeDocs decl
           subs = subordinates instanceMap decl
 
           ns = names l decl
           subNs = [ n | (n,_,_) <- subs ]
-      in ( [ (n, docStrs) | n <- ns ] ++ [ (n, ds) | (n, ds, _) <- subs ]
-         , [ (n, args)    | n <- ns ] ++ [ (n, as) | (n, _, as) <- subs ]
-         , [ (n, subNs)   | n <- ns ]
+      in ( [ mkDocItemPair n docStrs args
+           | not (null docStrs && null args)
+           , n <- ns
+           ] ++
+           [ mkDocItemPair n (coerce ds) (coerce as)
+           | (n, ds, as) <- subs
+           , not (null ds && null as)
+           ]
+         , [ (n, subNs)
+           | not (null subNs)
+           , n <- ns
+           ]
          )
 
 -- | Get all subordinate declarations inside a declaration, and their docs.
