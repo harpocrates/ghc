@@ -1078,7 +1078,7 @@ instance Binary ModIface where
         put_ bh trust
         put_ bh trust_pkg
         put_ bh complete_sigs
-        put_ bh docs
+        lazyPut bh docs
 
    get bh = do
         mod         <- get bh
@@ -1109,7 +1109,7 @@ instance Binary ModIface where
         trust       <- get bh
         trust_pkg   <- get bh
         complete_sigs <- get bh
-        docs        <- get bh
+        docs        <- {-# SCC "bin_docs" #-} lazyGet bh
         return (ModIface {
                  mi_module      = mod,
                  mi_sig_of      = sig_of,
