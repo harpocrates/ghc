@@ -144,7 +144,7 @@ module HscTypes (
         mkCompleteMatchMap, extendCompleteMatchMap,
 
         -- * Doc strings
-        DocEnv, DocItem(..), Docs(..), emptyDocEnv
+        DocEnv, DocItem(..), Docs(..), emptyDocEnv, extendDocEnvList
     ) where
 
 #include "HsVersions.h"
@@ -2314,6 +2314,9 @@ data Docs = Docs
 emptyDocEnv :: DocEnv
 emptyDocEnv = emptyNameEnv
 
+extendDocEnvList :: DocEnv -> [(Name, DocItem)] -> DocEnv
+extendDocEnvList = extendNameEnvList
+
 instance Binary Docs where
   put_ bh (Docs ds as) = do
     put_ bh ds
@@ -2540,6 +2543,7 @@ type PackageFamInstEnv       = FamInstEnv
 type PackageVectInfo         = VectInfo
 type PackageAnnEnv           = AnnEnv
 type PackageCompleteMatchMap = CompleteMatchMap
+type PackageDocEnv           = DocEnv
 
 -- | Information about other packages that we have slurped in by reading
 -- their interface files
@@ -2602,6 +2606,8 @@ data ExternalPackageState
         eps_vect_info    :: !PackageVectInfo,  -- ^ The total 'VectInfo' accumulated
                                                -- from all the external-package modules
         eps_ann_env      :: !PackageAnnEnv,    -- ^ The total 'AnnEnv' accumulated
+
+        eps_doc_env      :: !PackageDocEnv,   
                                                -- from all the external-package modules
         eps_complete_matches :: !PackageCompleteMatchMap,
                                   -- ^ The total 'CompleteMatchMap' accumulated

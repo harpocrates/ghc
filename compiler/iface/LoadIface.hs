@@ -36,7 +36,8 @@ import GhcPrelude
 
 import {-# SOURCE #-}   TcIface( tcIfaceDecl, tcIfaceRules, tcIfaceInst,
                                  tcIfaceFamInst, tcIfaceVectInfo,
-                                 tcIfaceAnnotations, tcIfaceCompleteSigs )
+                                 tcIfaceAnnotations, tcIfaceCompleteSigs,
+                                 tcIfaceDocs )
 
 import DynFlags
 import IfaceSyn
@@ -464,6 +465,7 @@ loadInterface doc_str mod from
         ; new_eps_fam_insts <- mapM tcIfaceFamInst (mi_fam_insts iface)
         ; new_eps_rules     <- tcIfaceRules ignore_prags (mi_rules iface)
         ; new_eps_anns      <- tcIfaceAnnotations (mi_anns iface)
+        ; new_eps_docs      <- tcIfaceDocs (mi_docs iface)
         ; new_eps_vect_info <- tcIfaceVectInfo mod (mkNameEnv new_eps_decls) (mi_vect_info iface)
         ; new_eps_complete_sigs <- tcIfaceCompleteSigs (mi_complete_sigs iface)
 
@@ -496,6 +498,8 @@ loadInterface doc_str mod from
                                                   new_eps_vect_info,
                   eps_ann_env      = extendAnnEnvList (eps_ann_env eps)
                                                       new_eps_anns,
+                  eps_doc_env      = trace ("extended doc env by " ++ show (length new_eps_docs) ++ " entries") $ extendDocEnvList (eps_doc_env eps)
+                                                      new_eps_docs,
                   eps_mod_fam_inst_env
                                    = let
                                        fam_inst_env =
@@ -931,6 +935,7 @@ initExternalPackageState
       eps_vect_info        = noVectInfo,
       eps_complete_matches = emptyUFM,
       eps_ann_env          = emptyAnnEnv,
+      eps_doc_env          = emptyDocEnv,
       eps_stats = EpsStats { n_ifaces_in = 0, n_decls_in = 0, n_decls_out = 0
                            , n_insts_in = 0, n_insts_out = 0
                            , n_rules_in = length builtinRules, n_rules_out = 0 }

@@ -8,9 +8,10 @@ import TcRnTypes   ( IfL )
 import InstEnv     ( ClsInst )
 import FamInstEnv  ( FamInst )
 import CoreSyn     ( CoreRule )
-import HscTypes    ( TypeEnv, VectInfo, IfaceVectInfo, CompleteMatch )
+import HscTypes    ( TypeEnv, VectInfo, IfaceVectInfo, CompleteMatch, Docs, DocItem )
 import Module      ( Module )
 import Annotations ( Annotation )
+import Name        ( OccName, Name )
 
 tcIfaceDecl         :: Bool -> IfaceDecl -> IfL TyThing
 tcIfaceRules        :: Bool -> [IfaceRule] -> IfL [CoreRule]
@@ -19,3 +20,4 @@ tcIfaceInst         :: IfaceClsInst -> IfL ClsInst
 tcIfaceFamInst      :: IfaceFamInst -> IfL FamInst
 tcIfaceAnnotations  :: [IfaceAnnotation] -> IfL [Annotation]
 tcIfaceCompleteSigs :: [IfaceCompleteMatch] -> IfL [CompleteMatch]
+tcIfaceDocs         :: [(OccName,Docs)] -> IfL [(Name, DocItem)] 

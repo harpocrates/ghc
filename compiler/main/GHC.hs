@@ -117,6 +117,7 @@ module GHC (
         showModule,
         moduleIsBootOrNotObjectLinkable,
         getNameToInstancesIndex,
+        getNameToDocIndex,
 
         -- ** Inspecting types and kinds
         exprType, TcRnExprMode(..),
@@ -297,7 +298,7 @@ import HscMain
 import GhcMake
 import DriverPipeline   ( compileOne' )
 import GhcMonad
-import TcRnMonad        ( finalSafeMode, fixSafeInstances )
+import TcRnMonad        ( finalSafeMode, fixSafeInstances, initTcForLookup )
 import TcRnTypes
 import Packages
 import NameSet
@@ -313,6 +314,7 @@ import DataCon
 import Name             hiding ( varName )
 import Avail
 import InstEnv
+import TcEnv            ( tcGetDocEnv )
 import FamInstEnv ( FamInst )
 import SrcLoc
 import CoreSyn
@@ -927,7 +929,8 @@ typecheckModule pmod = do
            minf_instances = fixSafeInstances safe $ md_insts details,
            minf_iface     = Nothing,
            minf_safe      = safe,
-           minf_modBreaks = emptyModBreaks
+           minf_modBreaks = emptyModBreaks,
+           minf_docs      = md_docs details
          }}
 
 -- | Desugar a typechecked module.
@@ -1110,7 +1113,8 @@ data ModuleInfo = ModuleInfo {
         minf_instances :: [ClsInst],
         minf_iface     :: Maybe ModIface,
         minf_safe      :: SafeHaskellMode,
-        minf_modBreaks :: ModBreaks
+        minf_modBreaks :: ModBreaks,
+        minf_docs      :: DocEnv
   }
         -- We don't want HomeModInfo here, because a ModuleInfo applies
         -- to package modules too.
@@ -1149,7 +1153,8 @@ getPackageModuleInfo hsc_env mdl
                         minf_instances = error "getModuleInfo: instances for package module unimplemented",
                         minf_iface     = Just iface,
                         minf_safe      = getSafeMode $ mi_trust iface,
-                        minf_modBreaks = emptyModBreaks
+                        minf_modBreaks = emptyModBreaks,
+                        minf_docs      = error "getModuleInfo: docs for package module unimplemented"
                 }))
 
 getHomeModuleInfo :: HscEnv -> Module -> IO (Maybe ModuleInfo)
@@ -1165,8 +1170,9 @@ getHomeModuleInfo hsc_env mdl =
                         minf_rdr_env   = mi_globals $! hm_iface hmi,
                         minf_instances = md_insts details,
                         minf_iface     = Just iface,
-                        minf_safe      = getSafeMode $ mi_trust iface
-                       ,minf_modBreaks = getModBreaks hmi
+                        minf_safe      = getSafeMode $ mi_trust iface,
+                        minf_modBreaks = getModBreaks hmi,
+                        minf_docs      = md_docs details
                         }))
 
 -- | The list of top-level entities defined in a module
@@ -1274,6 +1280,13 @@ getNameToInstancesIndex visible_mods = do
                (fmap (,Seq.empty) cls_index)
                (fmap (Seq.empty,) fam_index)
            ] }
+
+-- | Retrieve _all_ the docs in the environment, indexed by 'Name'
+getNameToDocIndex :: GhcMonad m
+                  => m (NameEnv DocItem)
+getNameToDocIndex = withSession $ \hsc_env -> do
+  liftIO $ initTcForLookup hsc_env tcGetDocEnv 
+
 
 -- -----------------------------------------------------------------------------
 

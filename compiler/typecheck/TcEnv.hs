@@ -66,7 +66,10 @@ module TcEnv(
         newDFunName, newDFunName', newFamInstTyConName,
         newFamInstAxiomName,
         mkStableIdFromString, mkStableIdFromName,
-        mkWrapperName
+        mkWrapperName,
+
+        -- Docs
+        tcGetDocEnv
   ) where
 
 #include "HsVersions.h"
@@ -250,6 +253,13 @@ tcGetInstEnvs = do { eps <- getEps
                    ; return (InstEnvs { ie_global  = eps_inst_env eps
                                       , ie_local   = tcg_inst_env env
                                       , ie_visible = tcVisibleOrphanMods env }) }
+
+-- | Gets both the external-package and the home-package doc env (which
+-- should include the module being compiled).
+tcGetDocEnv :: TcM DocEnv
+tcGetDocEnv = do { eps <- getEps
+                 ; env <- getGblEnv
+                 ; return (eps_doc_env eps `plusNameEnv` tcg_doc_env env) }
 
 instance MonadThings (IOEnv (Env TcGblEnv TcLclEnv)) where
     lookupThing = tcLookupGlobal

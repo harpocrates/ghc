@@ -17,7 +17,8 @@ module TcIface (
         tcIfaceDecl, tcIfaceInst, tcIfaceFamInst, tcIfaceRules,
         tcIfaceVectInfo, tcIfaceAnnotations, tcIfaceCompleteSigs,
         tcIfaceExpr,    -- Desired by HERMIT (Trac #7683)
-        tcIfaceGlobal
+        tcIfaceGlobal,
+        tcIfaceDocs
  ) where
 
 #include "HsVersions.h"
@@ -183,7 +184,7 @@ typecheckIface iface
         ; complete_sigs <- tcIfaceCompleteSigs (mi_complete_sigs iface)
 
                 -- Docs
-        ; docs <- tcIfaceDocs (mi_docs iface)
+        ; docs <- mkNameEnv <$> tcIfaceDocs (mi_docs iface)
 
                 -- Finished
         ; traceIf (vcat [text "Finished typechecking interface for" <+> ppr (mi_module iface),
@@ -400,7 +401,7 @@ typecheckIfacesForMerging mod ifaces tc_env_var =
         vect_info <- tcIfaceVectInfo (mi_semantic_module iface) type_env (mi_vect_info iface)
         exports   <- ifaceExportNames (mi_exports iface)
         complete_sigs <- tcIfaceCompleteSigs (mi_complete_sigs iface)
-        docs      <- tcIfaceDocs (mi_docs iface)
+        docs      <- mkNameEnv <$> tcIfaceDocs (mi_docs iface)
         return $ ModDetails { md_types     = type_env
                             , md_insts     = insts
                             , md_fam_insts = fam_insts
@@ -443,7 +444,7 @@ typecheckIfaceForInstantiate nsubst iface =
     vect_info <- tcIfaceVectInfo (mi_semantic_module iface) type_env (mi_vect_info iface)
     exports   <- ifaceExportNames (mi_exports iface)
     complete_sigs <- tcIfaceCompleteSigs (mi_complete_sigs iface)
-    docs      <- tcIfaceDocs (mi_docs iface)
+    docs      <- mkNameEnv <$> tcIfaceDocs (mi_docs iface)
     return $ ModDetails { md_types     = type_env
                         , md_insts     = insts
                         , md_fam_insts = fam_insts
@@ -1127,8 +1128,8 @@ tcIfaceAnnTarget (ModuleTarget mod) = do
 ************************************************************************
 -}
 
-tcIfaceDocs :: [(OccName,Docs)] -> IfL DocEnv
-tcIfaceDocs = fmap mkNameEnv . mapM tcIfaceDoc
+tcIfaceDocs :: [(OccName,Docs)] -> IfL [(Name, DocItem)]
+tcIfaceDocs = mapM tcIfaceDoc
 
 tcIfaceDoc :: (OccName, Docs) -> IfL (Name, DocItem)
 tcIfaceDoc (occ, docs)
