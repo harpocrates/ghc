@@ -87,7 +87,7 @@ import GhcPrelude
 import qualified GHC.LanguageExtensions as LangExt
 }
 
-%expect 235 -- shift/reduce conflicts
+%expect 234 -- shift/reduce conflicts
 
 {- Last updated: 04 June 2018
 
@@ -700,17 +700,19 @@ unitdecls :: { OrdList (LHsUnitDecl PackageName) }
         | unitdecl              { unitOL $1 }
 
 unitdecl :: { LHsUnitDecl PackageName }
-        : maybedocheader 'module' modid maybemodwarning maybeexports 'where' body
+        : 'module' modid maybemodwarning maybeexports 'where' body
              -- XXX not accurate
-             { sL1 $2 $ DeclD ModuleD $3 (Just (sL1 $2 (HsModule (Just $3) $5 (fst $ snd $7) (snd $ snd $7) $4 $1))) }
-        | maybedocheader 'signature' modid maybemodwarning maybeexports 'where' body
-             { sL1 $2 $ DeclD SignatureD $3 (Just (sL1 $2 (HsModule (Just $3) $5 (fst $ snd $7) (snd $ snd $7) $4 $1))) }
-        -- NB: MUST have maybedocheader here, otherwise shift-reduce conflict
-        -- will prevent us from parsing both forms.
-        | maybedocheader 'module' modid
-             { sL1 $2 $ DeclD ModuleD $3 Nothing }
-        | maybedocheader 'signature' modid
-             { sL1 $2 $ DeclD SignatureD $3 Nothing }
+             {% do { md <- removeLastCommentNext (getLoc $1)
+                   ; let mod = HsModule (Just $2) $4 (fst $ snd $6) (snd $ snd $6) $3 md
+                   ; pure (sL1 $1 $ DeclD ModuleD $2 (Just (sL1 $1 mod))) } }
+        | 'signature' modid maybemodwarning maybeexports 'where' body
+             {% do { md <- removeLastCommentNext (getLoc $1)
+                   ; let mod = HsModule (Just $2) $4 (fst $ snd $6) (snd $ snd $6) $3 md
+                   ; pure (sL1 $1 $ DeclD SignatureD $2 (Just (sL1 $1 mod))) } }
+        | 'module' modid
+             { sL1 $1 $ DeclD ModuleD $2 Nothing }
+        | 'signature' modid
+             { sL1 $1 $ DeclD SignatureD $2 Nothing }
         | 'dependency' unitid mayberns
              { sL1 $1 $ IncludeD (IncludeDecl { idUnitId = $2
                                               , idModRenaming = $3
@@ -731,29 +733,25 @@ unitdecl :: { LHsUnitDecl PackageName }
 -- know what they are doing. :-)
 
 signature :: { Located (HsModule GhcPs) }
-       : maybedocheader 'signature' modid maybemodwarning maybeexports 'where' body
-             {% fileSrcSpan >>= \ loc ->
-                ams (L loc (HsModule (Just $3) $5 (fst $ snd $7)
-                              (snd $ snd $7) $4 $1)
-                    )
-                    ([mj AnnSignature $2, mj AnnWhere $6] ++ fst $7) }
+       : 'signature' modid maybemodwarning maybeexports 'where' body
+             {% do { md <- removeLastCommentNext (getLoc $1)
+                   ; loc <- fileSrcSpan
+                   ; ams (L loc (HsModule (Just $2) $4 (fst $ snd $6)
+                              (snd $ snd $6) $3 md))
+                         ([mj AnnSignature $1, mj AnnWhere $5] ++ fst $6) } }
 
 module :: { Located (HsModule GhcPs) }
-       : maybedocheader 'module' modid maybemodwarning maybeexports 'where' body
-             {% fileSrcSpan >>= \ loc ->
-                ams (L loc (HsModule (Just $3) $5 (fst $ snd $7)
-                              (snd $ snd $7) $4 $1)
-                    )
-                    ([mj AnnModule $2, mj AnnWhere $6] ++ fst $7) }
+       : 'module' modid maybemodwarning maybeexports 'where' body
+             {% do { md <- removeLastCommentNext (getLoc $1)
+                   ; loc <- fileSrcSpan
+                   ; ams (L loc (HsModule (Just $2) $4 (fst $ snd $6)
+                              (snd $ snd $6) $3 md))
+                         ([mj AnnModule $1, mj AnnWhere $5] ++ fst $6) } }
         | body2
                 {% fileSrcSpan >>= \ loc ->
                    ams (L loc (HsModule Nothing Nothing
                                (fst $ snd $1) (snd $ snd $1) Nothing Nothing))
                        (fst $1) }
-
-maybedocheader :: { Maybe LHsDocString }
-        : moduleheader            { $1 }
-        | {- empty -}             { Nothing }
 
 missing_module_keyword :: { () }
         : {- empty -}                           {% pushModuleContext }
@@ -796,14 +794,16 @@ top1    :: { ([LImportDecl GhcPs], [LHsDecl GhcPs]) }
 -- Module declaration & imports only
 
 header  :: { Located (HsModule GhcPs) }
-        : maybedocheader 'module' modid maybemodwarning maybeexports 'where' header_body
-                {% fileSrcSpan >>= \ loc ->
-                   ams (L loc (HsModule (Just $3) $5 $7 [] $4 $1
-                          )) [mj AnnModule $2,mj AnnWhere $6] }
-        | maybedocheader 'signature' modid maybemodwarning maybeexports 'where' header_body
-                {% fileSrcSpan >>= \ loc ->
-                   ams (L loc (HsModule (Just $3) $5 $7 [] $4 $1
-                          )) [mj AnnModule $2,mj AnnWhere $6] }
+        : 'module' modid maybemodwarning maybeexports 'where' header_body
+                {% do { md <- removeLastCommentNext (getLoc $1)
+                      ; loc <- fileSrcSpan
+                      ; ams (L loc (HsModule (Just $2) $4 $6 [] $3 md))
+                            [mj AnnModule $1,mj AnnWhere $5] } }
+        | 'signature' modid maybemodwarning maybeexports 'where' header_body
+                {% do { md <- removeLastCommentNext (getLoc $1)
+                      ; loc <- fileSrcSpan
+                      ; ams (L loc (HsModule (Just $2) $4 $6 [] $3 md))
+                            [mj AnnModule $1,mj AnnWhere $5] } }
         | header_body2
                 {% fileSrcSpan >>= \ loc ->
                    return (L loc (HsModule Nothing Nothing $1 [] Nothing
@@ -1887,24 +1887,31 @@ type :: { LHsType GhcPs }
 
 
 typedoc :: { LHsType GhcPs }
-        : btype                          { $1 }
-        | btype docprev                  { sLL $1 $> $ HsDocTy noExt $1 $2 }
-        | docnext btype                  { sLL $1 $> $ HsDocTy noExt $2 $1 }
-        | btype '->'     ctypedoc        {% ams $1 [mu AnnRarrow $2] -- See note [GADT decl discards annotations]
-                                         >> ams (sLL $1 $> $ HsFunTy noExt $1 $3)
-                                                [mu AnnRarrow $2] }
+      --  : btype                          { $1 }
+        : btype docprev                  { sLL $1 $> $ HsDocTy noExt $1 $2 }
+        | btype                          {% do { md <- removeLastCommentNext (getLoc $1)
+                                               ; case md of
+                                                   Nothing -> pure $1
+                                                   Just d -> pure (sLL d $> $ HsDocTy noExt $1 d) } }
+     --   | btype '->'     ctypedoc        {% ams $1 [mu AnnRarrow $2] -- See note [GADT decl discards annotations]
+     --                                    >> ams (sLL $1 $> $ HsFunTy noExt $1 $3)
+     --                                           [mu AnnRarrow $2] }
         | btype docprev '->' ctypedoc    {% ams $1 [mu AnnRarrow $3] -- See note [GADT decl discards annotations]
                                          >> ams (sLL $1 $> $
                                                  HsFunTy noExt (L (comb2 $1 $2)
                                                             (HsDocTy noExt $1 $2))
                                                          $4)
                                                 [mu AnnRarrow $3] }
-        | docnext btype '->' ctypedoc    {% ams $2 [mu AnnRarrow $3] -- See note [GADT decl discards annotations]
-                                         >> ams (sLL $1 $> $
-                                                 HsFunTy noExt (L (comb2 $1 $2)
-                                                            (HsDocTy noExt $2 $1))
-                                                         $4)
-                                                [mu AnnRarrow $3] }
+        | btype '->' ctypedoc            {% do { md <- removeLastCommentNext (getLoc $1)
+                                               ; ams $1 [mu AnnRarrow $2] -- See note [GADT decl discards annotations]
+                                               ; case md of
+                                                   Nothing -> ams (sLL $1 $> $ HsFunTy noExt $1 $3)
+                                                                  [mu AnnRarrow $2]
+                                                   Just d ->  ams (sLL d $> $
+                                                                   HsFunTy noExt (L (comb2 d $1)
+                                                                              (HsDocTy noExt $1 d))
+                                                                           $3)
+                                                                  [mu AnnRarrow $2] } }
 
 
 
@@ -2132,9 +2139,10 @@ gadt_constrs :: { Located [LConDecl GhcPs] }
 
 gadt_constr_with_doc :: { LConDecl GhcPs }
 gadt_constr_with_doc
-        : maybe_docnext ';' gadt_constr
-                {% return $ addConDoc $3 $1 }
-        | gadt_constr
+        : ';' gadt_constr
+                {% do { d <- removeLastCommentNext (getLoc $1)
+                      ; return $ addConDoc $2 d } }
+        |     gadt_constr
                 {% return $1 }
 
 gadt_constr :: { LConDecl GhcPs }
@@ -2158,32 +2166,37 @@ allowed in usual data constructors, but not in GADTs).
 -}
 
 constrs :: { Located ([AddAnn],[LConDecl GhcPs]) }
-        : maybe_docnext '=' constrs1    { L (comb2 $2 $3) ([mj AnnEqual $2]
-                                                     ,addConDocs (unLoc $3) $1)}
+        : '=' constrs1    {% do { d <- removeLastCommentNext (getLoc $1)
+                                ; pure $ L (comb2 $1 $2) ([mj AnnEqual $1]
+                                                           ,addConDocs (unLoc $2) d) } }
 
 constrs1 :: { Located [LConDecl GhcPs] }
-        : constrs1 maybe_docnext '|' maybe_docprev constr
-            {% addAnnotation (gl $ head $ unLoc $1) AnnVbar (gl $3)
-               >> return (sLL $1 $> (addConDoc $5 $2 : addConDocFirst (unLoc $1) $4)) }
+        : constrs1 '|' maybe_docprev constr
+            {% do { addAnnotation (gl $ head $ unLoc $1) AnnVbar (gl $2)
+                  ; md <- removeLastCommentNext (getLoc $2)
+                  ; return (sLL $1 $> (addConDoc $4 md : addConDocFirst (unLoc $1) $3)) } }
         | constr                                          { sL1 $1 [$1] }
 
 constr :: { LConDecl GhcPs }
-        : maybe_docnext forall context_no_ops '=>' constr_stuff
-                {% ams (let (con,details,doc_prev) = unLoc $5 in
-                  addConDoc (L (comb4 $2 $3 $4 $5) (mkConDeclH98 con
-                                                       (snd $ unLoc $2)
-                                                       (Just $3)
+        : forall context_no_ops '=>' constr_stuff
+                {% do { md <- removeLastCommentNext (comb2 $1 $2)
+                      ; let (con,details,doc_prev) = unLoc $4
+                      ; ams (addConDoc (L (comb4 $1 $2 $3 $4) (mkConDeclH98 con
+                                                       (snd $ unLoc $1)
+                                                       (Just $2)
                                                        details))
-                            ($1 `mplus` doc_prev))
-                        (mu AnnDarrow $4:(fst $ unLoc $2)) }
-        | maybe_docnext forall constr_stuff
-                {% ams ( let (con,details,doc_prev) = unLoc $3 in
-                  addConDoc (L (comb2 $2 $3) (mkConDeclH98 con
-                                                      (snd $ unLoc $2)
+                                       (md `mplus` doc_prev))
+                            (mu AnnDarrow $3:(fst $ unLoc $1)) } }
+
+        | forall constr_stuff
+                {% do { md <- removeLastCommentNext (comb2 $1 $2)
+                      ; let (con,details,doc_prev) = unLoc $2
+                      ; ams (addConDoc (L (comb2 $1 $2) (mkConDeclH98 con
+                                                      (snd $ unLoc $1)
                                                       Nothing   -- No context
                                                       details))
-                            ($1 `mplus` doc_prev))
-                       (fst $ unLoc $2) }
+                                       (md `mplus` doc_prev))
+                            (fst $ unLoc $1) } }
 
 forall :: { Located ([AddAnn], Maybe [LHsTyVarBndr GhcPs]) }
         : 'forall' tv_bndrs '.'       { sLL $1 $> ([mu AnnForall $1,mj AnnDot $3], Just $2) }
@@ -2207,17 +2220,19 @@ fielddecls :: { [LConDeclField GhcPs] }
         | fielddecls1     { $1 }
 
 fielddecls1 :: { [LConDeclField GhcPs] }
-        : fielddecl maybe_docnext ',' maybe_docprev fielddecls1
-            {% addAnnotation (gl $1) AnnComma (gl $3) >>
-               return ((addFieldDoc $1 $4) : addFieldDocs $5 $2) }
+        : fielddecl ',' maybe_docprev fielddecls1
+            {% do { addAnnotation (gl $1) AnnComma (gl $2)
+                  ; d <- removeLastCommentNext (getLoc $2)
+                  ; return ((addFieldDoc $1 $3) : addFieldDocs $4 d) } }
         | fielddecl   { [$1] }
 
 fielddecl :: { LConDeclField GhcPs }
                                               -- A list because of   f,g :: Int
-        : maybe_docnext sig_vars '::' ctype maybe_docprev
-            {% ams (L (comb2 $2 $4)
-                      (ConDeclField noExt (reverse (map (\ln@(L l n) -> L l $ FieldOcc noExt ln) (unLoc $2))) $4 ($1 `mplus` $5)))
-                   [mu AnnDcolon $3] }
+        : sig_vars '::' ctype maybe_docprev
+            {% do { d <- removeLastCommentNext (getLoc $1)
+                  ; ams (L (comb2 $1 $3)
+                           (ConDeclField noExt (reverse (map (\ln@(L l n) -> L l $ FieldOcc noExt ln) (unLoc $1))) $3 (d `mplus` $4)))
+                   [mu AnnDcolon $2] } }
 
 -- Reversed!
 maybe_derivings :: { HsDeriving GhcPs }
@@ -3461,16 +3476,8 @@ docsection :: { Located (Int, HsDocString) }
   : DOCSECTION {% let (n, doc) = getDOCSECTION $1 in
         return (sL1 $1 (n, mkHsDocString doc)) }
 
-moduleheader :: { Maybe LHsDocString }
-        : DOCNEXT {% let string = getDOCNEXT $1 in
-                     return (Just (sL1 $1 (mkHsDocString string))) }
-
 maybe_docprev :: { Maybe LHsDocString }
         : docprev                       { Just $1 }
-        | {- empty -}                   { Nothing }
-
-maybe_docnext :: { Maybe LHsDocString }
-        : docnext                       { Just $1 }
         | {- empty -}                   { Nothing }
 
 {

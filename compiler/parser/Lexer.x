@@ -73,7 +73,8 @@ module Lexer (
    lexTokenStream,
    addAnnotation,AddAnn,addAnnsAt,mkParensApiAnn,
    commentToAnnotation,
-   moveAnnotations
+   moveAnnotations,
+   removeLastCommentNext,
   ) where
 
 import GhcPrelude
@@ -121,6 +122,9 @@ import BasicTypes     ( InlineSpec(..), RuleMatchInfo(..),
 
 -- compiler/parser
 import Ctype
+
+
+import HsDoc
 
 import ApiAnnotation
 }
@@ -1996,7 +2000,13 @@ data PState = PState {
         -- See note [Api annotations] in ApiAnnotation.hs
         annotations :: [(ApiAnnKey,[SrcSpan])],
         comment_q :: [Located AnnotationComment],
-        annotations_comments :: [(SrcSpan,[Located AnnotationComment])]
+        annotations_comments :: [(SrcSpan,[Located AnnotationComment])],
+
+        -- | comment-like tokens keyed by the left and right ends of the token
+        -- that follow them.
+        --
+        -- TODO: change to RealSrcLoc
+        comment_next, comment_prev :: [(SrcLoc, [Located Token])]
      }
         -- last_loc and last_len are used when generating error messages,
         -- and in pushCurrentContext only.  Sigh, if only Happy passed the
@@ -2509,7 +2519,9 @@ mkPStatePure options buf loc =
       use_pos_prags = True,
       annotations = [],
       comment_q = [],
-      annotations_comments = []
+      annotations_comments = [],
+      comment_next = [],
+      comment_prev = []
     }
 
 addWarning :: WarningFlag -> SrcSpan -> SDoc -> P ()
@@ -2589,6 +2601,84 @@ getOffside = P $ \s@PState{last_loc=loc, context=stk} ->
                               (GT, dontGenerateSemic)
                 in POk s ord
 
+-- Comments next
+
+getCommentsNext :: P [(SrcLoc, [Located Token])]
+getCommentsNext = P $ \s@PState{ comment_next = nc } -> POk s nc
+
+setCommentsNext :: [(SrcLoc, [Located Token])] -> P ()
+setCommentsNext nc = P $ \s -> POk s{ comment_next = nc } ()
+
+-- | Look for and remove a '-- |' comment which
+removeCommentsNext :: Outputable a => SrcSpan -> ([Located Token] -> (a, [Located Token])) ->  P (Maybe a)
+removeCommentsNext sp func = do
+  nc <- getCommentsNext
+  let (x, nc') = go (srcSpanStart sp) nc
+  setCommentsNext nc'
+  pure x
+  where
+    go s1 [] = (Nothing, [])
+    go s1 (t@(s2, toks) : ts)
+      | s1 == s2 = case func toks of
+                     (x, []) -> (Just x, ts)
+                     (x, toks') -> (Just x, (s2, toks') : ts)
+      | s1 > s2 = (Nothing, ts)
+      | otherwise = let ~(mt, ts') = go s1 ts in (mt, t : ts')
+
+
+removeLastCommentNext :: SrcSpan -> P (Maybe LHsDocString)
+removeLastCommentNext s = join <$> removeCommentsNext s go
+  where
+    go (L sp (ITdocCommentNext s) : rs) = (Just (L sp (mkHsDocString s)), rs)
+    go rs = (Nothing, rs)
+
+addCommentsNext :: SrcLoc -> [Located Token] -> P ()
+addCommentsNext sloc ltoks = P $ \s@PState{ comment_next = nc } ->
+                                   let newNc = case nc of
+                                                 (sloc',ltoks') : nc' | sloc == sloc' -> (sloc, ltoks' ++ ltoks) : nc'
+                                                 _ -> (sloc, ltoks) : nc
+                                   in POk s{ comment_next = newNc } ()
+
+-- Comments prev
+
+getCommentsPrev :: P [(SrcLoc, [Located Token])]
+getCommentsPrev = P $ \s@PState{ comment_prev = pc } -> POk s pc
+
+setCommentsPrev :: [(SrcLoc, [Located Token])] -> P ()
+setCommentsPrev pc = P $ \s -> POk s{ comment_prev = pc } ()
+
+-- | Look for and remove a '-- ^' comment which
+removeCommentsPrev :: Outputable a => SrcSpan -> ([Located Token] -> (a, [Located Token])) ->  P (Maybe a)
+removeCommentsPrev sp func = do
+  pc <- getCommentsPrev
+  let (x, pc') = go (srcSpanStart sp) pc
+  setCommentsPrev pc'
+  pure x
+  where
+    go s1 [] = (Nothing, [])
+    go s1 (t@(s2, toks) : ts)
+      | s1 == s2 = case func toks of
+                     (x, []) -> (Just x, ts)
+                     (x, toks') -> (Just x, (s2, toks') : ts)
+      | s1 > s2 = (Nothing, ts)
+      | otherwise = let ~(mt, ts') = go s1 ts in (mt, t : ts')
+
+
+removeFirstCommentPrev :: SrcSpan -> P (Maybe LHsDocString)
+removeFirstCommentPrev s = join <$> removeCommentsPrev s go
+  where
+    go [L sp (ITdocCommentPrev s)] = (Just (L sp (mkHsDocString s)), [])
+    go (x : rs) = let ~(f, rs') = go rs in (f, x : rs')
+    go [] = (Nothing, [])
+
+addCommentsPrev :: SrcLoc -> [Located Token] -> P ()
+addCommentsPrev sloc ltoks = P $ \s@PState{ comment_prev = pc } ->
+                                   let newPc = case pc of
+                                                 (sloc',ltoks') : pc' | sloc == sloc' -> (sloc, ltoks' ++ ltoks) : pc'
+                                                 _ -> (sloc, ltoks) : pc
+                                   in POk s{ comment_prev = newPc } ()
+
+
 -- ---------------------------------------------------------------------------
 -- Construct a parse error
 
@@ -2643,7 +2733,7 @@ lexer :: Bool -> (Located Token -> P a) -> P a
 lexer queueComments cont = do
   alr <- extension alternativeLayoutRule
   let lexTokenFun = if alr then lexTokenAlr else lexToken
-  (L span tok) <- lexTokenFun
+  (L span tok) <- lexComments lexTokenFun
   --trace ("token: " ++ show tok) $ do
 
   case tok of
@@ -2657,6 +2747,24 @@ lexer queueComments cont = do
   if (queueComments && isComment tok)
     then queueComment (L (RealSrcSpan span) tok) >> lexer queueComments cont
     else cont (L (RealSrcSpan span) tok)
+
+lexComments :: P (RealLocated Token) -- ^ How to get a token
+            -> P (RealLocated Token) -- ^ The next non-Haddock-like token
+lexComments lexTokenFun = go []
+  where
+  go acc = do
+    rlTok@(L realSpan tok) <- lexTokenFun
+    let lTok = L (RealSrcSpan realSpan) tok
+    case tok of
+ --     ITdocCommentPrev{}
+      ITdocCommentNext{} -> go (lTok : acc)
+  --    ITdocCommentNamed{} -> go (lTok : acc)
+  --    ITdocSection{} -> go (lTok : acc)
+  --    ITdocOptions{} -> go (lTok : acc)
+      _ -> do
+        addCommentsNext (RealSrcLoc (realSrcSpanStart realSpan)) (reverse acc)
+        pure rlTok
+
 
 lexTokenAlr :: P (RealLocated Token)
 lexTokenAlr = do mPending <- popPendingImplicitToken
@@ -3005,7 +3113,6 @@ clean_pragma prag = canon_ws (map toLower (unprefix prag))
                                               "constructorlike" -> "conlike"
                                               _ -> prag'
                           canon_ws s = unwords (map canonical (words s))
-
 
 
 {-
