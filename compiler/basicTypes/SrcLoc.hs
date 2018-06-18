@@ -314,6 +314,7 @@ combineSrcSpans l (UnhelpfulSpan _) = l
 combineSrcSpans (RealSrcSpan span1) (RealSrcSpan span2)
   | srcSpanFile span1 == srcSpanFile span2
       = RealSrcSpan (combineRealSrcSpans span1 span2)
+>>>>>>> Check if files are same in combineSrcSpans
   | otherwise = UnhelpfulSpan (fsLit "<combineSrcSpans: files differ>")
 
 -- | Combines two 'SrcSpan' into one that spans at least all the characters
