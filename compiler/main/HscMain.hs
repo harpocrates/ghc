@@ -85,6 +85,7 @@ module HscMain
 import GhcPrelude
 
 import Data.Data hiding (Fixity, TyCon)
+import Data.Maybe       ( fromJust )
 import DynFlags         (addPluginModuleName)
 import Id
 import GHCi             ( addSptEntry )
@@ -170,6 +171,11 @@ import System.IO (fixIO)
 import qualified Data.Map as Map
 import qualified Data.Set as S
 import Data.Set (Set)
+
+import HieAst
+import HieTypes
+import HieBin
+import HieDebug
 
 #include "HsVersions.h"
 
@@ -392,14 +398,35 @@ hscParse' mod_summary
 
 -- -----------------------------------------------------------------------------
 -- | If the renamed source has been kept, extract it. Dump it if requested.
-extract_renamed_stuff :: TcGblEnv -> Hsc (TcGblEnv, RenamedStuff)
-extract_renamed_stuff tc_result = do
+extract_renamed_stuff :: ModSummary -> TcGblEnv -> Hsc (TcGblEnv, RenamedStuff)
+extract_renamed_stuff mod_summary tc_result = do
     let rn_info = getRenamedStuff tc_result
 
     dflags <- getDynFlags
     liftIO $ dumpIfSet_dyn dflags Opt_D_dump_rn_ast "Renamer" $
                            showAstData NoBlankSrcSpan rn_info
-
+    when (gopt Opt_IdeInfo dflags) $ do
+        hieFile <- mkHieFile mod_summary (tcg_binds tc_result) (fromJust rn_info)
+        let out_file = ml_hie_file $ ms_location mod_summary
+        liftIO $ writeHieFile out_file hieFile
+        when (gopt Opt_ValidateHie dflags) $ do
+            hs_env <- Hsc $ \e w -> return (e, w)
+            liftIO $ do
+              -- Validate Scopes
+              case validateScopes $ getAsts $ hieAST hieFile of
+                  [] -> putMsg dflags $ text "Got valid scopes"
+                  xs -> do
+                    putMsg dflags $ text "Got invalid scopes"
+                    mapM_ (putMsg dflags) xs
+              -- Roundtrip testing
+              nc <- readIORef $ hsc_NC hs_env
+              (file', _) <- liftIO $ readHieFile nc out_file
+              case diffFile hieFile file' of
+                [] ->
+                  putMsg dflags $ text "Got no roundtrip errors"
+                xs -> do
+                  putMsg dflags $ text "Got roundtrip errors"
+                  mapM_ (putMsg dflags) xs
     return (tc_result, rn_info)
 
 
@@ -409,14 +436,14 @@ hscTypecheckRename :: HscEnv -> ModSummary -> HsParsedModule
                    -> IO (TcGblEnv, RenamedStuff)
 hscTypecheckRename hsc_env mod_summary rdr_module = runHsc hsc_env $ do
       tc_result <- hscTypecheck True mod_summary (Just rdr_module)
-      extract_renamed_stuff tc_result
+      extract_renamed_stuff mod_summary tc_result
 
 hscTypecheck :: Bool -- ^ Keep renamed source?
              -> ModSummary -> Maybe HsParsedModule
              -> Hsc TcGblEnv
 hscTypecheck keep_rn mod_summary mb_rdr_module = do
     tc_result <- hscTypecheck' keep_rn mod_summary mb_rdr_module
-    _ <- extract_renamed_stuff tc_result
+    _ <- extract_renamed_stuff mod_summary tc_result
     return tc_result
 
 
@@ -433,6 +460,7 @@ hscTypecheck' keep_rn mod_summary mb_rdr_module = do
         inner_mod = canonicalizeHomeModule dflags mod_name
         src_filename  = ms_hspp_file mod_summary
         real_loc = realSrcLocSpan $ mkRealSrcLoc (mkFastString src_filename) 1 1
+        keep_rn' = gopt Opt_IdeInfo dflags || keep_rn
     MASSERT( moduleUnitId outer_mod == thisPackage dflags )
     if hsc_src == HsigFile && not (isHoleModule inner_mod)
         then ioMsgMaybe $ tcRnInstantiateSignature hsc_env outer_mod' real_loc
@@ -440,7 +468,7 @@ hscTypecheck' keep_rn mod_summary mb_rdr_module = do
          do hpm <- case mb_rdr_module of
                     Just hpm -> return hpm
                     Nothing -> hscParse' mod_summary
-            tc_result0 <- tcRnModule' mod_summary keep_rn hpm
+            tc_result0 <- tcRnModule' mod_summary keep_rn' hpm
             if hsc_src == HsigFile
                 then do (iface, _, _) <- liftIO $ hscSimpleIface hsc_env tc_result0 Nothing
                         ioMsgMaybe $
@@ -1410,7 +1438,8 @@ hscCompileCmmFile hsc_env filename output_filename = runHsc hsc_env $ do
   where
     no_loc = ModLocation{ ml_hs_file  = Just filename,
                           ml_hi_file  = panic "hscCompileCmmFile: no hi file",
-                          ml_obj_file = panic "hscCompileCmmFile: no obj file" }
+                          ml_obj_file = panic "hscCompileCmmFile: no obj file",
+                          ml_hie_file = panic "hscCompileCmmFile: no hie file"}
 
 -------------------- Stuff for new code gen ---------------------
 
@@ -1589,7 +1618,8 @@ hscDeclsWithLocation hsc_env0 str source linenumber =
     -- We use a basically null location for iNTERACTIVE
     let iNTERACTIVELoc = ModLocation{ ml_hs_file   = Nothing,
                                       ml_hi_file   = panic "hsDeclsWithLocation:ml_hi_file",
-                                      ml_obj_file  = panic "hsDeclsWithLocation:ml_hi_file"}
+                                      ml_obj_file  = panic "hsDeclsWithLocation:ml_obj_file",
+                                      ml_hie_file  = panic "hsDeclsWithLocation:ml_hie_file" }
     ds_result <- hscDesugar' iNTERACTIVELoc tc_gblenv
 
     {- Simplify -}
