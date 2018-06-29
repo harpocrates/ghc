@@ -765,7 +765,7 @@ hsModuleToModSummary pn hsc_src modname
                                 HsSrcFile -> "hs")
     -- DANGEROUS: bootifying can POISON the module finder cache
     let location = case hsc_src of
-                        HsBootFile -> addBootSuffixLocn location0
+                        HsBootFile -> addBootSuffixLocnOut location0
                         _ -> location0
     -- This duplicates a pile of logic in GhcMake
     env <- getBkpEnv

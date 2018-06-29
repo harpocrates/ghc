@@ -1627,7 +1627,7 @@ getLocation src_flavour mod_name = do
         location1 <- liftIO $ mkHomeModLocation2 dflags mod_name basename suff
 
         -- Boot-ify it if necessary
-        let location2 | HsBootFile <- src_flavour = addBootSuffixLocn location1
+        let location2 | HsBootFile <- src_flavour = addBootSuffixLocnOut location1
                       | otherwise                 = location1
 
 
