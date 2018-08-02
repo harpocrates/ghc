@@ -32,6 +32,7 @@ module Parser (parseModule, parseSignature, parseImport, parseStatement, parseBa
 import Control.Monad    ( unless, liftM )
 import GHC.Exts
 import Data.Char
+import Data.Either      ( fromLeft, fromRight )
 import Control.Monad    ( mplus )
 import Control.Applicative ((<$))
 
@@ -48,7 +49,7 @@ import PackageConfig
 import OrdList
 import BooleanFormula   ( BooleanFormula(..), LBooleanFormula(..), mkTrue )
 import FastString
-import Maybes           ( isJust, orElse, maybeToList )
+import Maybes           ( isJust, orElse, maybeToList, catMaybes )
 import Outputable
 
 -- compiler/basicTypes
@@ -829,31 +830,31 @@ header_top_importdecls :: { [LImportDecl GhcPs] }
 -- The Export List
 
 maybeexports :: { (Maybe (Located [LIE GhcPs])) }
-        :  '(' exportlist ')'       {% ams (sLL $1 $> ()) [mop $1,mcp $3] >>
-                                       return (Just (sLL $1 $> (fromOL $2))) }
+        :  paren_exportlist         { Just $1 }
         |  {- empty -}              { Nothing }
 
+
+paren_exportlist :: { Located [LIE GhcPs] }
+        :  '(' exportlist ')'       {% do { ams (sLL $1 $> ()) [mop $1,mcp $3]
+                                          ; ds <- fmap toOL $ removeAllExpDocsNext (getLoc $3)
+                                          ; return (sLL $1 $> (fromOL ($2 `appOL` ds))) } }
+
 exportlist :: { OrdList (LIE GhcPs) }
-        : expdoclist ',' expdoclist   {% addAnnotation (oll $1) AnnComma (gl $2)
-                                         >> return ($1 `appOL` $3) }
-        | exportlist1                 { $1 }
+        : ','                       {% do { ds <- fmap toOL $ removeAllExpDocsNext (getLoc $1)
+                                          ; addAnnotation (oll ds) AnnComma (gl $1)
+                                          ; return ds } }
+        | exportlist1               { $1 }
 
 exportlist1 :: { OrdList (LIE GhcPs) }
-        : expdoclist export expdoclist ',' exportlist1
-                          {% (addAnnotation (oll ($1 `appOL` $2 `appOL` $3))
-                                            AnnComma (gl $4) ) >>
-                              return ($1 `appOL` $2 `appOL` $3 `appOL` $5) }
-        | expdoclist export expdoclist             { $1 `appOL` $2 `appOL` $3 }
-        | expdoclist                               { $1 }
-
-expdoclist :: { OrdList (LIE GhcPs) }
-        : exp_doc expdoclist                           { $1 `appOL` $2 }
-        | {- empty -}                                  { nilOL }
-
-exp_doc :: { OrdList (LIE GhcPs) }
-        : docsection    { unitOL (sL1 $1 (case (unLoc $1) of (n, doc) -> IEGroup noExt n doc)) }
-        | docnamed      { unitOL (sL1 $1 (IEDocNamed noExt ((fst . unLoc) $1))) }
-        | docnext       { unitOL (sL1 $1 (IEDoc noExt (unLoc $1))) }
+        : export ',' exportlist1
+                                    {% do { ds <- fmap toOL $ removeAllExpDocsNext (oll $1)
+                                          ; ds2 <- fmap toOL $ removeAllExpDocsNext (getLoc $2)
+                                          ; (addAnnotation (oll (ds `appOL` $1 `appOL` ds2))
+                                                        AnnComma (gl $2))
+                                          ; return (ds `appOL` $1 `appOL` ds2 `appOL` $>) } }
+        | export                    {% do { ds <- removeAllExpDocsNext (oll $1)
+                                          ; pure (toOL ds `appOL` $1) } }
+        | {- empty -}               { nilOL }
 
 
    -- No longer allow things like [] and (,,,) to be exported
@@ -986,13 +987,9 @@ maybeimpspec :: { Located (Maybe (Bool, Located [LIE GhcPs])) }
         | {- empty -}              { noLoc Nothing }
 
 impspec :: { Located (Bool, Located [LIE GhcPs]) }
-        :  '(' exportlist ')'               {% ams (sLL $1 $> (False,
-                                                      sLL $1 $> $ fromOL $2))
-                                                   [mop $1,mcp $3] }
-        |  'hiding' '(' exportlist ')'      {% ams (sLL $1 $> (True,
-                                                      sLL $1 $> $ fromOL $3))
-                                               [mj AnnHiding $1,mop $2,mcp $4] }
-
+        : paren_exportlist               { sL1 $1 (False, $1) }
+        | 'hiding' paren_exportlist      {% ams (sLL $1 $> (True, $2))
+                                               [mj AnnHiding $1] }
 -----------------------------------------------------------------------------
 -- Fixity Declarations
 
@@ -1018,26 +1015,42 @@ ops     :: { Located (OrdList (Located RdrName)) }
 topdecls :: { OrdList (LHsDecl GhcPs) }
         : topdecls_semi topdecl_docs   { $1 `appOL` $2 }
 
+-- One or more semicolons
+semis1_docs  :: { Either (OrdList (LHsDecl GhcPs)) [AddAnn] }
+semis1_docs
+        : semis1_docs ';'   {% do { ds <- removeAllDocDeclsNext (getLoc $2)
+                                  ; let ds' = fromLeft nilOL $1 `appOL` toOL [ fmap (DocD noExt) d | d <- ds ]
+                                  ; let as = mj AnnSemi $2 : fromRight [] $1
+                                  ; if isNilOL ds'
+                                      then pure (Right as)
+                                      else ams (lastOL ds') as >> pure (Left ds') } }
+
+        | ';'               {% do { ds <- removeAllDocDeclsNext (getLoc $1)
+                                  ; let ds' = toOL [ fmap (DocD noExt) d | d <- ds ]
+                                  ; let as = [mj AnnSemi $1]
+                                  ; if isNilOL ds'
+                                      then pure (Right as)
+                                      else ams (lastOL ds') as >> pure (Left ds') } }
+
+semis_docs  :: { Either (OrdList (LHsDecl GhcPs)) [AddAnn] }
+        : semis1_docs       { $1 }
+        | {- empty -}       { Left nilOL }
+
 -- May have trailing semicolons, can be empty
 topdecls_semi :: { OrdList (LHsDecl GhcPs) }
-        : topdecls_semi topdecl_docs semis1 {% ams (lastOL $2) $3 >> return ($1 `appOL` $2) }
-        | {- empty -}                       { nilOL }
+        : topdecls_semi topdecl_docs semis1_docs {% do { ams (lastOL $2) (fromRight [] $3)
+                                                       ; pure ($1 `appOL` $2 `appOL` fromLeft nilOL $3) } }
+        | {- empty -}                            { nilOL }
 
 topdecl_docs :: { OrdList (LHsDecl GhcPs) }
-        : topdecl                        {% do { md <- removeLastCommentNext (getLoc $1)
-                                               ; let dl = [ fmap (DocD noExt . DocCommentNext) d
-                                                          | d <- maybeToList md ]
-                                               ; md' <- removeFirstCommentPrev (getLoc $1)
-                                               ; let dl' = [ fmap (DocD noExt . DocCommentNext) d
-                                                           | d <- maybeToList md' ]
+        : topdecl                        {% do { ds <- removeAllDocDeclsNext (getLoc $1)
+                                               ; let dl = [ fmap (DocD noExt) d
+                                                          | d <- ds ]
+                                               ; ds' <- removeAllDocDeclsPrev (getLoc $1)
+                                               ; let dl' = [ fmap (DocD noExt) d
+                                                           | d <- ds' ]
                                                ; pure (toOL dl `appOL` unitOL $1 `appOL` toOL dl')
                                                } }
--- docdecld :: { LDocDecl }
---         : docnext                               { sL1 $1 (DocCommentNext (unLoc $1)) }
---         | docprev                               { sL1 $1 (DocCommentPrev (unLoc $1)) }
---         | docnamed                              { sL1 $1 (case (unLoc $1) of (n, doc) -> DocCommentNamed n doc) }
---         | docsection                            { sL1 $1 (case (unLoc $1) of (n, doc) -> DocGroup n doc) }
---
 
 topdecl :: { LHsDecl GhcPs }
         : cl_decl                               { sL1 $1 (TyClD noExt (unLoc $1)) }
@@ -2310,15 +2323,6 @@ There's an awkward overlap with a type signature.  Consider
   We can't tell whether to reduce var to qvar until after we've read the signatures.
 -}
 
-docdecl :: { LHsDecl GhcPs }
-        : docdecld { sL1 $1 (DocD noExt (unLoc $1)) }
-
-docdecld :: { LDocDecl }
-        : docnext                               { sL1 $1 (DocCommentNext (unLoc $1)) }
-        | docprev                               { sL1 $1 (DocCommentPrev (unLoc $1)) }
-        | docnamed                              { sL1 $1 (case (unLoc $1) of (n, doc) -> DocCommentNamed n doc) }
-        | docsection                            { sL1 $1 (case (unLoc $1) of (n, doc) -> DocGroup n doc) }
-
 decl_no_th :: { LHsDecl GhcPs }
         : sigdecl               { $1 }
 
@@ -2351,8 +2355,6 @@ decl_no_th :: { LHsDecl GhcPs }
                                         _ <- ams (L l ()) (ann ++ (fst $ unLoc $3));
                                         return $! (sL l $ ValD noExt r) } }
         | pattern_synonym_decl  { $1 }
-        | docdecl               { $1 } -- TODO: make sure everythign previously gotten here can
-                                       -- still be obtained somehow
 
 decl    :: { LHsDecl GhcPs }
         : decl_no_th            { $1 }
@@ -3728,6 +3730,42 @@ reportEmptyDoubleQuotes span = do
         [ text "Parser error on `''`"
         , text "Character literals may not be empty"
         ]
+
+
+{-
+%************************************************************************
+%*                                                                      *
+        Helper functions for processing comment tokens
+%*                                                                      *
+%************************************************************************
+-}
+
+removeAllDocDeclsNext :: SrcSpan -> P [LDocDecl]
+removeAllDocDeclsNext = fmap (catMaybes . map (traverse mkDocDecl)) .
+                          removeAllCommentsNext
+
+removeAllDocDeclsPrev :: SrcSpan -> P [LDocDecl]
+removeAllDocDeclsPrev = fmap (catMaybes . map (traverse mkDocDecl)) .
+                          removeAllCommentsPrev
+
+mkDocDecl :: Token -> Maybe DocDecl
+mkDocDecl tok = case tok of
+  ITdocCommentNext str  -> Just (DocCommentNext (mkHsDocString str))
+  ITdocCommentNamed str -> let (name,x) = break isSpace str
+                           in Just (DocCommentNamed name (mkHsDocString x))
+  ITdocSection n str    -> Just (DocGroup n (mkHsDocString str))
+  ITdocCommentPrev str  -> Just (DocCommentPrev (mkHsDocString str))
+  _ -> Nothing
+
+removeAllExpDocsNext :: SrcSpan -> P [LIE GhcPs]
+removeAllExpDocsNext = fmap (map (fmap mkExpDoc)) . removeAllCommentsNext
+
+mkExpDoc :: Token -> IE GhcPs
+mkExpDoc (ITdocSection n str)    = IEGroup noExt n (mkHsDocString str)
+mkExpDoc (ITdocCommentNamed str) = let (name,rest) = break isSpace str
+                                   in IEDocNamed noExt name
+mkExpDoc (ITdocCommentNext str)  = IEDoc noExt (mkHsDocString str)
+
 
 {-
 %************************************************************************
