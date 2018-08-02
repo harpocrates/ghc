@@ -48,7 +48,7 @@ import PackageConfig
 import OrdList
 import BooleanFormula   ( BooleanFormula(..), LBooleanFormula(..), mkTrue )
 import FastString
-import Maybes           ( isJust, orElse )
+import Maybes           ( isJust, orElse, maybeToList )
 import Outputable
 
 -- compiler/basicTypes
@@ -109,6 +109,7 @@ out what happened if the states were renumbered.  Try not to gratuitously move
 productions around in this file.
 
 -------------------------------------------------------------------------------
+TODO: this is fixed
 
 state 0 contains 1 shift/reduce conflicts.
 
@@ -1015,12 +1016,28 @@ ops     :: { Located (OrdList (Located RdrName)) }
 
 -- No trailing semicolons, non-empty
 topdecls :: { OrdList (LHsDecl GhcPs) }
-        : topdecls_semi topdecl        { $1 `snocOL` $2 }
+        : topdecls_semi topdecl_docs   { $1 `appOL` $2 }
 
 -- May have trailing semicolons, can be empty
 topdecls_semi :: { OrdList (LHsDecl GhcPs) }
-        : topdecls_semi topdecl semis1 {% ams $2 $3 >> return ($1 `snocOL` $2) }
-        | {- empty -}                  { nilOL }
+        : topdecls_semi topdecl_docs semis1 {% ams (lastOL $2) $3 >> return ($1 `appOL` $2) }
+        | {- empty -}                       { nilOL }
+
+topdecl_docs :: { OrdList (LHsDecl GhcPs) }
+        : topdecl                        {% do { md <- removeLastCommentNext (getLoc $1)
+                                               ; let dl = [ fmap (DocD noExt . DocCommentNext) d
+                                                          | d <- maybeToList md ]
+                                               ; md' <- removeFirstCommentPrev (getLoc $1)
+                                               ; let dl' = [ fmap (DocD noExt . DocCommentNext) d
+                                                           | d <- maybeToList md' ]
+                                               ; pure (toOL dl `appOL` unitOL $1 `appOL` toOL dl')
+                                               } }
+-- docdecld :: { LDocDecl }
+--         : docnext                               { sL1 $1 (DocCommentNext (unLoc $1)) }
+--         | docprev                               { sL1 $1 (DocCommentPrev (unLoc $1)) }
+--         | docnamed                              { sL1 $1 (case (unLoc $1) of (n, doc) -> DocCommentNamed n doc) }
+--         | docsection                            { sL1 $1 (case (unLoc $1) of (n, doc) -> DocGroup n doc) }
+--
 
 topdecl :: { LHsDecl GhcPs }
         : cl_decl                               { sL1 $1 (TyClD noExt (unLoc $1)) }
@@ -1887,24 +1904,15 @@ type :: { LHsType GhcPs }
 
 
 typedoc :: { LHsType GhcPs }
-      --  : btype                          { $1 }
-        : btype docprev                  { sLL $1 $> $ HsDocTy noExt $1 $2 }
-        | btype                          {% do { md <- removeLastCommentNext (getLoc $1)
-                                               ; case md of
+        : btype                          {% do { md <- removeLastCommentNext (getLoc $1)
+                                               ; md' <- removeFirstCommentPrev (getLoc $1)
+                                               ; case md `mplus` md' of
                                                    Nothing -> pure $1
                                                    Just d -> pure (sLL d $> $ HsDocTy noExt $1 d) } }
-     --   | btype '->'     ctypedoc        {% ams $1 [mu AnnRarrow $2] -- See note [GADT decl discards annotations]
-     --                                    >> ams (sLL $1 $> $ HsFunTy noExt $1 $3)
-     --                                           [mu AnnRarrow $2] }
-        | btype docprev '->' ctypedoc    {% ams $1 [mu AnnRarrow $3] -- See note [GADT decl discards annotations]
-                                         >> ams (sLL $1 $> $
-                                                 HsFunTy noExt (L (comb2 $1 $2)
-                                                            (HsDocTy noExt $1 $2))
-                                                         $4)
-                                                [mu AnnRarrow $3] }
         | btype '->' ctypedoc            {% do { md <- removeLastCommentNext (getLoc $1)
+                                               ; md' <- removeFirstCommentPrev (getLoc $1)
                                                ; ams $1 [mu AnnRarrow $2] -- See note [GADT decl discards annotations]
-                                               ; case md of
+                                               ; case md `mplus` md' of
                                                    Nothing -> ams (sLL $1 $> $ HsFunTy noExt $1 $3)
                                                                   [mu AnnRarrow $2]
                                                    Just d ->  ams (sLL d $> $
@@ -1941,8 +1949,10 @@ tyapp :: { Located TyEl }
                                                [mj AnnSimpleQuote $1,mj AnnVal $2] }
 
 atype_docs :: { LHsType GhcPs }
-        : atype docprev                 { sLL $1 $> $ HsDocTy noExt $1 $2 }
-        | atype                         { $1 }
+        : atype                         {% do { md <- removeFirstCommentPrev (getLoc $1)
+                                              ; case md of
+                                                  Nothing -> pure $1
+                                                  Just d -> pure (sLL $1 $> $ HsDocTy noExt $1 d) } }
 
 atype :: { LHsType GhcPs }
         : ntgtycon                       { sL1 $1 (HsTyVar noExt NotPromoted $1) }      -- Not including unit tuples
@@ -2171,10 +2181,11 @@ constrs :: { Located ([AddAnn],[LConDecl GhcPs]) }
                                                            ,addConDocs (unLoc $2) d) } }
 
 constrs1 :: { Located [LConDecl GhcPs] }
-        : constrs1 '|' maybe_docprev constr
+        : constrs1 '|' constr
             {% do { addAnnotation (gl $ head $ unLoc $1) AnnVbar (gl $2)
                   ; md <- removeLastCommentNext (getLoc $2)
-                  ; return (sLL $1 $> (addConDoc $4 md : addConDocFirst (unLoc $1) $3)) } }
+                  ; md' <- removeFirstCommentPrev (getLoc $2)
+                  ; return (sLL $1 $> (addConDoc $3 md : addConDocFirst (unLoc $1) md')) } }
         | constr                                          { sL1 $1 [$1] }
 
 constr :: { LConDecl GhcPs }
@@ -2206,13 +2217,14 @@ constr_stuff :: { Located (Located RdrName, HsConDeclDetails GhcPs, Maybe LHsDoc
     -- See Note [Parsing data constructors is hard] in RdrHsSyn
         : btype_no_ops                     {% do { c <- splitCon (unLoc $1)
                                                  ; return $ sL1 $1 c } }
-        | btype_no_ops conop maybe_docprev btype_no_ops
+        | btype_no_ops conop btype_no_ops
             {% do { lhs <- splitTilde (reverse (unLoc $1))
                   ; (_, ds_l) <- checkInfixConstr lhs
-                  ; let rhs1 = foldl1 mkHsAppTy (reverse (unLoc $4))
+                  ; md' <- removeFirstCommentPrev (getLoc $2)
+                  ; let rhs1 = foldl1 mkHsAppTy (reverse (unLoc $3))
                   ; (rhs, ds_r) <- checkInfixConstr rhs1
-                  ; return $ if isJust (ds_l `mplus` $3)
-                               then sLL $1 $> ($2, InfixCon lhs rhs1, $3)
+                  ; return $ if isJust (ds_l `mplus` md')
+                               then sLL $1 $> ($2, InfixCon lhs rhs1, md')
                                else sLL $1 $> ($2, InfixCon lhs rhs, ds_r) } }
 
 fielddecls :: { [LConDeclField GhcPs] }
@@ -2220,18 +2232,20 @@ fielddecls :: { [LConDeclField GhcPs] }
         | fielddecls1     { $1 }
 
 fielddecls1 :: { [LConDeclField GhcPs] }
-        : fielddecl ',' maybe_docprev fielddecls1
+        : fielddecl ',' fielddecls1
             {% do { addAnnotation (gl $1) AnnComma (gl $2)
                   ; d <- removeLastCommentNext (getLoc $2)
-                  ; return ((addFieldDoc $1 $3) : addFieldDocs $4 d) } }
+                  ; d' <- removeFirstCommentPrev (getLoc $2)
+                  ; return ((addFieldDoc $1 d') : addFieldDocs $3 d) } }
         | fielddecl   { [$1] }
 
 fielddecl :: { LConDeclField GhcPs }
                                               -- A list because of   f,g :: Int
-        : sig_vars '::' ctype maybe_docprev
+        : sig_vars '::' ctype
             {% do { d <- removeLastCommentNext (getLoc $1)
+                  ; d' <- removeFirstCommentPrev (getLoc $3)
                   ; ams (L (comb2 $1 $3)
-                           (ConDeclField noExt (reverse (map (\ln@(L l n) -> L l $ FieldOcc noExt ln) (unLoc $1))) $3 (d `mplus` $4)))
+                           (ConDeclField noExt (reverse (map (\ln@(L l n) -> L l $ FieldOcc noExt ln) (unLoc $1))) $3 (d `mplus` d')))
                    [mu AnnDcolon $2] } }
 
 -- Reversed!
@@ -2337,7 +2351,8 @@ decl_no_th :: { LHsDecl GhcPs }
                                         _ <- ams (L l ()) (ann ++ (fst $ unLoc $3));
                                         return $! (sL l $ ValD noExt r) } }
         | pattern_synonym_decl  { $1 }
-        | docdecl               { $1 }
+        | docdecl               { $1 } -- TODO: make sure everythign previously gotten here can
+                                       -- still be obtained somehow
 
 decl    :: { LHsDecl GhcPs }
         : decl_no_th            { $1 }
@@ -3219,8 +3234,11 @@ qtycon :: { Located RdrName }   -- Qualified or unqualified
         | tycon             { $1 }
 
 qtycondoc :: { LHsType GhcPs } -- Qualified or unqualified
-        : qtycon            { sL1 $1                           (HsTyVar noExt NotPromoted $1)      }
-        | qtycon docprev    { sLL $1 $> (HsDocTy noExt (sL1 $1 (HsTyVar noExt NotPromoted $1)) $2) }
+        : qtycon            {% do { md <- removeFirstCommentPrev (getLoc $1)
+                                  ; let tyVar = HsTyVar noExt NotPromoted $1
+                                  ; case md of
+                                      Nothing -> pure (sL1 $1 tyVar)
+                                      Just d -> pure (sLL $1 d (HsDocTy noExt (sL1 $1 tyVar) d)) } }
 
 tycon   :: { Located RdrName }  -- Unqualified
         : CONID                   { sL1 $1 $! mkUnqual tcClsName (getCONID $1) }
@@ -3475,10 +3493,6 @@ docnamed :: { Located (String, HsDocString) }
 docsection :: { Located (Int, HsDocString) }
   : DOCSECTION {% let (n, doc) = getDOCSECTION $1 in
         return (sL1 $1 (n, mkHsDocString doc)) }
-
-maybe_docprev :: { Maybe LHsDocString }
-        : docprev                       { Just $1 }
-        | {- empty -}                   { Nothing }
 
 {
 happyError :: P a

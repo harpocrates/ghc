@@ -75,6 +75,7 @@ module Lexer (
    commentToAnnotation,
    moveAnnotations,
    removeLastCommentNext,
+   removeFirstCommentPrev,
   ) where
 
 import GhcPrelude
@@ -2070,6 +2071,9 @@ failSpanMsgP span msg =
 getPState :: P PState
 getPState = P $ \s -> POk s s
 
+setPState :: PState -> P ()
+setPState s = P $ \_ -> POk s ()
+
 withThisPackage :: (UnitId -> a) -> P a
 withThisPackage f = P $ \s@(PState{options = o}) -> POk s (f (pThisPackage o))
 
@@ -2651,7 +2655,7 @@ setCommentsPrev pc = P $ \s -> POk s{ comment_prev = pc } ()
 removeCommentsPrev :: Outputable a => SrcSpan -> ([Located Token] -> (a, [Located Token])) ->  P (Maybe a)
 removeCommentsPrev sp func = do
   pc <- getCommentsPrev
-  let (x, pc') = go (srcSpanStart sp) pc
+  let (x, pc') = go (srcSpanEnd sp) pc
   setCommentsPrev pc'
   pure x
   where
@@ -2732,8 +2736,10 @@ lexError str = do
 lexer :: Bool -> (Located Token -> P a) -> P a
 lexer queueComments cont = do
   alr <- extension alternativeLayoutRule
+  hddk <- extension haddockEnabled
   let lexTokenFun = if alr then lexTokenAlr else lexToken
-  (L span tok) <- lexComments lexTokenFun
+  let lexTokenFunDocs = if hddk then lexComments lexTokenFun else lexTokenFun
+  (L span tok) <- lexTokenFunDocs
   --trace ("token: " ++ show tok) $ do
 
   case tok of
@@ -2750,20 +2756,42 @@ lexer queueComments cont = do
 
 lexComments :: P (RealLocated Token) -- ^ How to get a token
             -> P (RealLocated Token) -- ^ The next non-Haddock-like token
-lexComments lexTokenFun = go []
+lexComments lexTokenFun = do
+
+  -- Find '-- |' comments and tok
+  (docNexts, tok @ (L realSpan _)) <- getNext []
+
+  -- Peek '-- ^' comments
+  stashedState <- getPState
+  docPrevs <- getPrev []
+  setPState stashedState
+
+  addCommentsNext (RealSrcLoc (realSrcSpanStart realSpan)) (reverse docNexts)
+  addCommentsPrev (RealSrcLoc (realSrcSpanEnd realSpan)) (reverse docPrevs)
+
+  pure tok
+
   where
-  go acc = do
+  getNext :: [Located Token] -- ^ next '-- |' docs
+          -> P ([Located Token], RealLocated Token)
+  getNext acc = do
     rlTok@(L realSpan tok) <- lexTokenFun
     let lTok = L (RealSrcSpan realSpan) tok
     case tok of
- --     ITdocCommentPrev{}
-      ITdocCommentNext{} -> go (lTok : acc)
-  --    ITdocCommentNamed{} -> go (lTok : acc)
-  --    ITdocSection{} -> go (lTok : acc)
-  --    ITdocOptions{} -> go (lTok : acc)
-      _ -> do
-        addCommentsNext (RealSrcLoc (realSrcSpanStart realSpan)) (reverse acc)
-        pure rlTok
+      ITdocCommentNext{} -> getNext (lTok : acc)
+      ITdocCommentPrev{} -> getNext acc
+      _ -> pure (reverse acc, rlTok)
+
+  getPrev :: [Located Token] -- ^ next '-- ^' docs
+          -> P [Located Token]
+  getPrev acc = do
+    rlTok@(L realSpan tok) <- lexTokenFun
+    let lTok = L (RealSrcSpan realSpan) tok
+    case tok of
+      ITdocCommentNext{} -> getPrev acc
+      ITdocCommentPrev{} -> getPrev (lTok : acc)
+      _ -> pure (reverse acc)
+
 
 
 lexTokenAlr :: P (RealLocated Token)
