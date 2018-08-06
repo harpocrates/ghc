@@ -88,7 +88,7 @@ import GhcPrelude
 import qualified GHC.LanguageExtensions as LangExt
 }
 
-%expect 234 -- shift/reduce conflicts
+%expect 237 -- shift/reduce conflicts
 
 {- Last updated: 04 June 2018
 
@@ -1016,39 +1016,40 @@ topdecls :: { OrdList (LHsDecl GhcPs) }
         : topdecls_semi topdecl_docs   { $1 `appOL` $2 }
 
 -- One or more semicolons
-semis1_docs  :: { Either (OrdList (LHsDecl GhcPs)) [AddAnn] }
-semis1_docs
+semis1_docs  :: { Located ([AddAnn],OrdList (LHsDecl GhcPs)) }
         : semis1_docs ';'   {% do { ds <- removeAllDocDeclsNext (getLoc $2)
-                                  ; let ds' = fromLeft nilOL $1 `appOL` toOL [ fmap (DocD noExt) d | d <- ds ]
-                                  ; let as = mj AnnSemi $2 : fromRight [] $1
-                                  ; if isNilOL ds'
-                                      then pure (Right as)
-                                      else ams (lastOL ds') as >> pure (Left ds') } }
+                                  ; ds1 <- removeAllDocDeclsPrev (getLoc $2)
+                                  ; let ds' = snd (unLoc $1) `appOL` toOL ds
+                                  ; let ds'' = toOL ds1
+                                  ; let as = mj AnnSemi $2 : fst (unLoc $1)
+                                  ; r <- if isNilOL ds'
+                                           then pure (as, ds'')
+                                           else ams (lastOL ds') as >> pure ([], ds' `appOL` ds'')
+                                  ; pure (sLL $1 $> r) } }
 
         | ';'               {% do { ds <- removeAllDocDeclsNext (getLoc $1)
-                                  ; let ds' = toOL [ fmap (DocD noExt) d | d <- ds ]
+                                  ; ds1 <- removeAllDocDeclsPrev (getLoc $1)
+                                  ; let ds' = toOL ds
+                                  ; let ds'' = toOL ds1
                                   ; let as = [mj AnnSemi $1]
-                                  ; if isNilOL ds'
-                                      then pure (Right as)
-                                      else ams (lastOL ds') as >> pure (Left ds') } }
+                                  ; r <- if isNilOL ds'
+                                           then pure (as, ds'')
+                                           else ams (lastOL ds') as >> pure ([], ds' `appOL` ds'')
+                                  ; pure (sL1 $1 r) } }
 
-semis_docs  :: { Either (OrdList (LHsDecl GhcPs)) [AddAnn] }
+semis_docs  :: { Located ([AddAnn], OrdList (LHsDecl GhcPs)) }
         : semis1_docs       { $1 }
-        | {- empty -}       { Left nilOL }
+        | {- empty -}       { sL0 ([], nilOL) }
 
 -- May have trailing semicolons, can be empty
 topdecls_semi :: { OrdList (LHsDecl GhcPs) }
-        : topdecls_semi topdecl_docs semis1_docs {% do { ams (lastOL $2) (fromRight [] $3)
-                                                       ; pure ($1 `appOL` $2 `appOL` fromLeft nilOL $3) } }
+        : topdecls_semi topdecl_docs semis1_docs {% do { ams (lastOL $2) (fst (unLoc $3))
+                                                       ; pure ($1 `appOL` $2 `appOL` snd (unLoc $3)) } }
         | {- empty -}                            { nilOL }
 
 topdecl_docs :: { OrdList (LHsDecl GhcPs) }
-        : topdecl                        {% do { ds <- removeAllDocDeclsNext (getLoc $1)
-                                               ; let dl = [ fmap (DocD noExt) d
-                                                          | d <- ds ]
-                                               ; ds' <- removeAllDocDeclsPrev (getLoc $1)
-                                               ; let dl' = [ fmap (DocD noExt) d
-                                                           | d <- ds' ]
+        : topdecl                        {% do { dl <- removeAllDocDeclsNext (getLoc $1)
+                                               ; dl' <- removeAllDocDeclsPrev (getLoc $1)
                                                ; pure (toOL dl `appOL` unitOL $1 `appOL` toOL dl')
                                                } }
 
@@ -1478,9 +1479,10 @@ cvars1 :: { [RecordPatSynField (Located RdrName)] }
 
 where_decls :: { Located ([AddAnn]
                          , Located (OrdList (LHsDecl GhcPs))) }
-        : 'where' '{' decls '}'       { sLL $1 $> ((mj AnnWhere $1:moc $2
+        : 'where' '{' decls(decl) '}' { sLL $1 $> ((mj AnnWhere $1:moc $2
                                            :mcc $4:(fst $ unLoc $3)),sL1 $3 (snd $ unLoc $3)) }
-        | 'where' vocurly decls close { L (comb2 $1 $3) ((mj AnnWhere $1:(fst $ unLoc $3))
+        | 'where' vocurly decls(decl) close
+                                      { L (comb2 $1 $3) ((mj AnnWhere $1:(fst $ unLoc $3))
                                           ,sL1 $3 (snd $ unLoc $3)) }
 
 pattern_synonym_sig :: { LSig GhcPs }
@@ -1505,27 +1507,12 @@ decl_cls  : at_decl_cls                 { $1 }
                           ; ams (sLL $1 $> $ SigD noExt $ ClassOpSig noExt True [v] $ mkLHsSigType $4)
                                 [mj AnnDefault $1,mu AnnDcolon $3] } }
 
-decls_cls :: { Located ([AddAnn],OrdList (LHsDecl GhcPs)) }  -- Reversed
-          : decls_cls ';' decl_cls      {% if isNilOL (snd $ unLoc $1)
-                                             then return (sLL $1 $> (mj AnnSemi $2:(fst $ unLoc $1)
-                                                                    , unitOL $3))
-                                             else ams (lastOL (snd $ unLoc $1)) [mj AnnSemi $2]
-                                           >> return (sLL $1 $> (fst $ unLoc $1
-                                                                ,(snd $ unLoc $1) `appOL` unitOL $3)) }
-          | decls_cls ';'               {% if isNilOL (snd $ unLoc $1)
-                                             then return (sLL $1 $> (mj AnnSemi $2:(fst $ unLoc $1)
-                                                                                   ,snd $ unLoc $1))
-                                             else ams (lastOL (snd $ unLoc $1)) [mj AnnSemi $2]
-                                           >> return (sLL $1 $>  (unLoc $1)) }
-          | decl_cls                    { sL1 $1 ([], unitOL $1) }
-          | {- empty -}                 { noLoc ([],nilOL) }
-
 decllist_cls
         :: { Located ([AddAnn]
                      , OrdList (LHsDecl GhcPs)) }      -- Reversed
-        : '{'         decls_cls '}'     { sLL $1 $> (moc $1:mcc $3:(fst $ unLoc $2)
-                                             ,snd $ unLoc $2) }
-        |     vocurly decls_cls close   { $2 }
+        : '{'         decls(decl_cls) '}'   { sLL $1 $> (moc $1:mcc $3:(fst $ unLoc $2)
+                                                          ,snd $ unLoc $2) }
+        |     vocurly decls(decl_cls) close { $2 }
 
 -- Class body
 --
@@ -1539,31 +1526,16 @@ where_cls :: { Located ([AddAnn]
 
 -- Declarations in instance bodies
 --
-decl_inst  :: { Located (OrdList (LHsDecl GhcPs)) }
-decl_inst  : at_decl_inst               { sLL $1 $> (unitOL (sL1 $1 (InstD noExt (unLoc $1)))) }
-           | decl                       { sLL $1 $> (unitOL $1) }
+decl_inst  :: { LHsDecl GhcPs }
+decl_inst  : at_decl_inst               { sL1 $1 (InstD noExt (unLoc $1)) }
+           | decl                       { $1 }
 
-decls_inst :: { Located ([AddAnn],OrdList (LHsDecl GhcPs)) }   -- Reversed
-           : decls_inst ';' decl_inst   {% if isNilOL (snd $ unLoc $1)
-                                             then return (sLL $1 $> (mj AnnSemi $2:(fst $ unLoc $1)
-                                                                    , unLoc $3))
-                                             else ams (lastOL $ snd $ unLoc $1) [mj AnnSemi $2]
-                                           >> return
-                                            (sLL $1 $> (fst $ unLoc $1
-                                                       ,(snd $ unLoc $1) `appOL` unLoc $3)) }
-           | decls_inst ';'             {% if isNilOL (snd $ unLoc $1)
-                                             then return (sLL $1 $> (mj AnnSemi $2:(fst $ unLoc $1)
-                                                                                   ,snd $ unLoc $1))
-                                             else ams (lastOL $ snd $ unLoc $1) [mj AnnSemi $2]
-                                           >> return (sLL $1 $> (unLoc $1)) }
-           | decl_inst                  { sL1 $1 ([],unLoc $1) }
-           | {- empty -}                { noLoc ([],nilOL) }
 
 decllist_inst
         :: { Located ([AddAnn]
                      , OrdList (LHsDecl GhcPs)) }      -- Reversed
-        : '{'         decls_inst '}'    { sLL $1 $> (moc $1:mcc $3:(fst $ unLoc $2),snd $ unLoc $2) }
-        |     vocurly decls_inst close  { L (gl $2) (unLoc $2) }
+        : '{'         decls(decl_inst) '}'    { sLL $1 $> (moc $1:mcc $3:(fst $ unLoc $2),snd $ unLoc $2) }
+        |     vocurly decls(decl_inst) close  { L (gl $2) (unLoc $2) }
 
 -- Instance body
 --
@@ -1575,31 +1547,37 @@ where_inst :: { Located ([AddAnn]
                                              ,(snd $ unLoc $2)) }
         | {- empty -}                   { noLoc ([],nilOL) }
 
--- Declarations in binding groups other than classes and instances
+
+-- Declarations in binding groups
 --
-decls   :: { Located ([AddAnn],OrdList (LHsDecl GhcPs)) }
-        : decls ';' decl    {% if isNilOL (snd $ unLoc $1)
-                                 then return (sLL $1 $> (mj AnnSemi $2:(fst $ unLoc $1)
-                                                        , unitOL $3))
-                                 else do ams (lastOL $ snd $ unLoc $1) [mj AnnSemi $2]
+decls(d) :: { Located ([AddAnn],OrdList (LHsDecl GhcPs)) }
+        : decls(d) semis1_docs d
+                            {% if isNilOL (snd $ unLoc $1)
+                                 then return (sLL $1 $> (fst (unLoc $2) ++ (fst $ unLoc $1)
+                                                        , (snd $ unLoc $2) `appOL` unitOL $3))
+                                 else do ams (lastOL $ snd $ unLoc $1) (fst $ unLoc $2)
                                            >> return (
                                           let { this = unitOL $3;
                                                 rest = snd $ unLoc $1;
-                                                these = rest `appOL` this }
-                                          in rest `seq` this `seq` these `seq`
+                                                docs = snd $ unLoc $2;
+                                                these = rest `appOL` docs `appOL` this }
+                                          in rest `seq` this `seq` docs `seq` these `seq`
                                              (sLL $1 $> (fst $ unLoc $1,these))) }
-        | decls ';'          {% if isNilOL (snd $ unLoc $1)
-                                  then return (sLL $1 $> ((mj AnnSemi $2:(fst $ unLoc $1)
-                                                          ,snd $ unLoc $1)))
-                                  else ams (lastOL $ snd $ unLoc $1) [mj AnnSemi $2]
-                                           >> return (sLL $1 $> (unLoc $1)) }
-        | decl                          { sL1 $1 ([], unitOL $1) }
+        | decls(d) semis1_docs
+                             {% if isNilOL (snd $ unLoc $1)
+                                  then return (sLL $1 $> ((fst $ unLoc $2) ++ (fst $ unLoc $1)
+                                                          ,snd $ unLoc $1))
+                                  else ams (lastOL $ snd $ unLoc $1) (fst $ unLoc $2)
+                                           >> return (sLL $1 $> (fst $ unLoc $1
+                                                                ,(snd $ unLoc $1) `appOL`
+                                                                 (snd $ unLoc $2))) }
+        | d                             { sL1 $1 ([], unitOL $1) }
         | {- empty -}                   { noLoc ([],nilOL) }
 
 decllist :: { Located ([AddAnn],Located (OrdList (LHsDecl GhcPs))) }
-        : '{'            decls '}'     { sLL $1 $> (moc $1:mcc $3:(fst $ unLoc $2)
-                                                   ,sL1 $2 $ snd $ unLoc $2) }
-        |     vocurly    decls close   { L (gl $2) (fst $ unLoc $2,sL1 $2 $ snd $ unLoc $2) }
+        : '{'            decls(decl) '}'     { sLL $1 $> (moc $1:mcc $3:(fst $ unLoc $2)
+                                                         ,sL1 $2 $ snd $ unLoc $2) }
+        |     vocurly    decls(decl) close   { L (gl $2) (fst $ unLoc $2,sL1 $2 $ snd $ unLoc $2) }
 
 -- Binding groups other than those of class and instance declarations
 --
@@ -3740,12 +3718,16 @@ reportEmptyDoubleQuotes span = do
 %************************************************************************
 -}
 
-removeAllDocDeclsNext :: SrcSpan -> P [LDocDecl]
-removeAllDocDeclsNext = fmap (catMaybes . map (traverse mkDocDecl)) .
+removeAllDocDeclsNext :: SrcSpan -> P [LHsDecl GhcPs]
+removeAllDocDeclsNext = fmap (map (fmap (DocD noExt)) .
+                              catMaybes               .
+                              map (traverse mkDocDecl)) .
                           removeAllCommentsNext
 
-removeAllDocDeclsPrev :: SrcSpan -> P [LDocDecl]
-removeAllDocDeclsPrev = fmap (catMaybes . map (traverse mkDocDecl)) .
+removeAllDocDeclsPrev :: SrcSpan -> P [LHsDecl GhcPs]
+removeAllDocDeclsPrev = fmap (map (fmap (DocD noExt)) .
+                              catMaybes               .
+                              map (traverse mkDocDecl)) .
                           removeAllCommentsPrev
 
 mkDocDecl :: Token -> Maybe DocDecl
