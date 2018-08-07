@@ -785,16 +785,19 @@ body2   :: { ([AddAnn]
 
 top     :: { ([AddAnn]
              ,([LImportDecl GhcPs], [LHsDecl GhcPs])) }
-        : semis_toks top1                       {% do { ds <- if (null (fst $2))
-                                                                then traverse removeAllDocDeclsNext (map getLoc (snd $1))
+        : semis_toks top1                       {% do -- Only try to remove doc decls if there are
+                                                      --  no imports
+                                                      { ds <- if (null (fst $2))
+                                                                then traverse removeAllDocDecls
+                                                                              (map getLoc (snd $1))
                                                                 else pure []
                                                       ; pure (fst $1, (fst $2, join ds ++ snd $2))
                                                       } }
 
 top1    :: { ([LImportDecl GhcPs], [LHsDecl GhcPs]) }
-        : importdecls_semi topdecls_semi        {% do { ds <- traverse removeAllDocDeclsNext (map getLoc (snd $1))
+        : importdecls_semi topdecls_semi        {% do { ds <- traverse removeAllDocDecls (map getLoc (snd $1))
                                                       ; pure (reverse $ fst $1, join ds ++ cvTopDecls $2) } }
-        | importdecls_semi topdecls             {% do { ds <- traverse removeAllDocDeclsNext (map getLoc (snd $1))
+        | importdecls_semi topdecls             {% do { ds <- traverse removeAllDocDecls (map getLoc (snd $1))
                                                       ; pure (reverse $ fst $1, join ds ++ cvTopDecls $2) } }
         | importdecls                           { (reverse $1, []) }
 
@@ -3733,6 +3736,10 @@ reportEmptyDoubleQuotes span = do
 %*                                                                      *
 %************************************************************************
 -}
+
+removeAllDocDecls :: SrcSpan -> P [LHsDecl GhcPs]
+removeAllDocDecls sp = (++) <$> removeAllDocDeclsNext sp
+                            <*> removeAllDocDeclsPrev sp
 
 removeAllDocDeclsNext :: SrcSpan -> P [LHsDecl GhcPs]
 removeAllDocDeclsNext = fmap (map (fmap (DocD noExt)) .

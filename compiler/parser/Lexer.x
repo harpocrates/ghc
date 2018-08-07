@@ -124,9 +124,10 @@ import BasicTypes     ( InlineSpec(..), RuleMatchInfo(..),
 -- compiler/parser
 import Ctype
 import HaddockUtils
-
-import HsDoc
 import ApiAnnotation
+
+-- compiler/hsSyn
+import HsDoc          ( LHsDocString, mkHsDocString )
 }
 
 -- -----------------------------------------------------------------------------
@@ -2002,11 +2003,9 @@ data PState = PState {
         comment_q :: [Located AnnotationComment],
         annotations_comments :: [(SrcSpan,[Located AnnotationComment])],
 
-        -- | comment-like tokens keyed by the left and right ends of the token
-        -- that follow them.
-        --
-        -- TODO: change to RealSrcLoc
-        comment_next, comment_prev :: DocStore (Located Token)
+        -- | Haddock-related tokens keyed by the right/left ends of the
+        -- token that follow/precede them. See Note [Haddock tokens].
+        comments_follow, comments_precede :: DocStore (Located Token)
      }
         -- last_loc and last_len are used when generating error messages,
         -- and in pushCurrentContext only.  Sigh, if only Happy passed the
@@ -2523,8 +2522,8 @@ mkPStatePure options buf loc =
       annotations = [],
       comment_q = [],
       annotations_comments = [],
-      comment_next = emptyDocStore,
-      comment_prev = emptyDocStore
+      comments_follow = emptyDocStore,
+      comments_precede = emptyDocStore
     }
 
 addWarning :: WarningFlag -> SrcSpan -> SDoc -> P ()
@@ -2562,7 +2561,8 @@ mkTabWarning PState{tab_first=tf, tab_count=tc} d =
                  mkWarnMsg d (RealSrcSpan s) alwaysQualify message) tf
 
 mkHaddockWarning :: PState -> DynFlags -> [ErrMsg]
-mkHaddockWarning PState{comment_next=cn, comment_prev=cp} d = map report elts
+mkHaddockWarning PState{ comments_follow = cn
+                       , comments_precede = cp } d = map report elts
   where
     elts = docStoreElts cn ++ docStoreElts cp
     msg = text "Unexpected Haddock-style comment"
@@ -2615,68 +2615,87 @@ getOffside = P $ \s@PState{last_loc=loc, context=stk} ->
                               (GT, dontGenerateSemic)
                 in POk s ord
 
--- Comments next
 
-getCommentsNext :: P (DocStore (Located Token))
-getCommentsNext = P $ \s@PState{ comment_next = nc } -> POk s nc
+-- ---------------------------------------------------------------------------
+-- Comment-like tokens
 
-setCommentsNext :: DocStore (Located Token) -> P ()
-setCommentsNext nc = P $ \s -> POk s{ comment_next = nc } ()
+{- Note [Haddock tokens]
 
--- | Look for and remove a '-- |' comment which
-removeCommentsNext :: Outputable a => SrcSpan -> ([Located Token] -> (a, [Located Token])) ->  P (Maybe a)
-removeCommentsNext (RealSrcSpan sp) func = do
-  nc <- getCommentsNext
-  let (x, nc') = docStoreAdjust func (realSrcSpanStart sp) nc
-  setCommentsNext nc'
-  pure x
-removeCommentsNext (UnhelpfulSpan _) _ = pure Nothing
+It makes sense to detect Haddock tokens at the lexer, like comments. Just like
+comments, we want to filter these out before the parser - writing a grammar
+that takes into account all of the possible places (both valid and invalid)
+that a Haddock token can go is an impossible task!
 
+When @-haddock@ is passed and Haddock tokens get produced by the lexer, we
+pluck these out and put them in the 'comments_follow' and 'comments_precede'
+fields of 'PState', keyed under the location of the next/previous token. The
+parser then pulls back out doc comments associated with positions where valid
+Haddocks' are expected.
+
+TODO: talk about lookahead
+
+-}
+
+-- | Adjust the comment-like tokens that preceded the provided 'SrcSpan'.
+adjustCommentsNext :: ([Located Token] -> (a, [Located Token]))
+                   -> SrcSpan
+                   -> P (Maybe a)
+adjustCommentsNext func (RealSrcSpan sp) =
+  P $ \s@PState { comments_follow = nc } ->
+          let (x, nc') = docStoreAdjust func (realSrcSpanStart sp) nc
+          in POk s{ comments_follow = nc' } x
+adjustCommentsNext _ (UnhelpfulSpan _) = pure Nothing
+
+-- | Remove the last comment-like token that preceded the provided 'SrcSpan'.
 removeLastCommentNext :: SrcSpan -> P (Maybe LHsDocString)
-removeLastCommentNext s = join <$> removeCommentsNext s go
+removeLastCommentNext = fmap join . adjustCommentsNext go
   where
     go (L sp (ITdocCommentNext s) : rs) = (Just (L sp (mkHsDocString s)), rs)
     go rs = (Nothing, rs)
 
+-- | Remove all last comment-like tokens that preceded the provided 'SrcSpan'.
 removeAllCommentsNext :: SrcSpan -> P [Located Token]
-removeAllCommentsNext s = fromMaybe [] <$> removeCommentsNext s (\tks -> (reverse tks, []))
+removeAllCommentsNext = fmap (fromMaybe []) .
+                        adjustCommentsNext (\tks -> (reverse tks, []))
 
+-- | Add comment-like tokens that preceded the provided 'SrcSpan'.
 addCommentsNext :: SrcLoc -> [Located Token] -> P ()
-addCommentsNext (RealSrcLoc sloc) ltoks = P $ \s@PState{ comment_next = nc } ->
-                                                 let newNc = addToDocStore sloc ltoks nc
-                                                 in POk s{ comment_next = newNc } ()
+addCommentsNext (RealSrcLoc sloc) ltoks =
+  P $ \s@PState{ comments_follow = nc } ->
+          let newNc = addToDocStore sloc ltoks nc
+          in POk s{ comments_follow = newNc } ()
+addCommentsNext _ _ = pure ()
 
--- Comments prev
+-- | Adjust the comment-like tokens that followed the provided 'SrcSpan'.
+adjustCommentsPrev :: ([Located Token] -> (a, [Located Token]))
+                   -> SrcSpan
+                   -> P (Maybe a)
+adjustCommentsPrev func (RealSrcSpan sp) =
+  P $ \s@PState { comments_precede = pc } ->
+          let (x, pc') = docStoreAdjust func (realSrcSpanEnd sp) pc
+          in POk s{ comments_precede = pc' } x
+adjustCommentsPrev _ (UnhelpfulSpan _) = pure Nothing
 
-getCommentsPrev :: P (DocStore (Located Token))
-getCommentsPrev = P $ \s@PState{ comment_prev = pc } -> POk s pc
-
-setCommentsPrev :: DocStore (Located Token) -> P ()
-setCommentsPrev pc = P $ \s -> POk s{ comment_prev = pc } ()
-
--- | Look for and remove a '-- ^' comment which
-removeCommentsPrev :: Outputable a => SrcSpan -> ([Located Token] -> (a, [Located Token])) ->  P (Maybe a)
-removeCommentsPrev (RealSrcSpan sp) func = do
-  pc <- getCommentsPrev
-  let (x, pc') = docStoreAdjust func (realSrcSpanEnd sp) pc
-  setCommentsPrev pc'
-  pure x
-removeCommentsPrev (UnhelpfulSpan _) _ = pure Nothing
-
+-- | Remove the first comment-like tokens that followed the provided 'SrcSpan'.
 removeFirstCommentPrev :: SrcSpan -> P (Maybe LHsDocString)
-removeFirstCommentPrev s = join <$> removeCommentsPrev s go
+removeFirstCommentPrev = fmap join . adjustCommentsPrev go
   where
     go [L sp (ITdocCommentPrev s)] = (Just (L sp (mkHsDocString s)), [])
     go (x : rs) = let ~(f, rs') = go rs in (f, x : rs')
     go [] = (Nothing, [])
 
+-- | Remove all last comment-like tokens that followed the provided 'SrcSpan'.
 removeAllCommentsPrev :: SrcSpan -> P [Located Token]
-removeAllCommentsPrev s = fromMaybe [] <$> removeCommentsPrev s (\tks -> (reverse tks, []))
+removeAllCommentsPrev = fmap (fromMaybe []) .
+                        adjustCommentsPrev (\tks -> (reverse tks, []))
 
+-- | Add comment-like tokens that followed the provided 'SrcSpan'.
 addCommentsPrev :: SrcLoc -> [Located Token] -> P ()
-addCommentsPrev (RealSrcLoc sloc) ltoks = P $ \s@PState{ comment_prev = pc } ->
-                                                 let newPc = addToDocStore sloc ltoks pc
-                                                 in POk s{ comment_prev = newPc } ()
+addCommentsPrev (RealSrcLoc sloc) ltoks =
+  P $ \s@PState{ comments_precede = pc } ->
+          let newPc = addToDocStore sloc ltoks pc
+          in POk s{ comments_precede = newPc } ()
+addCommentsPrev _ _ = pure ()
 
 
 -- ---------------------------------------------------------------------------
@@ -2750,11 +2769,17 @@ lexer queueComments cont = do
     then queueComment (L (RealSrcSpan span) tok) >> lexer queueComments cont
     else cont (L (RealSrcSpan span) tok)
 
+-- | Given a function for lexing a token, produce the next non-Haddock-like
+-- token. All immediately preceding and immediately following Haddock-like
+-- tokens are pushed into the 'comments_follow' and 'comments_precede' token
+-- stores.
+--
+-- See Note [Haddock tokens].
 lexComments :: P (RealLocated Token) -- ^ How to get a token
             -> P (RealLocated Token) -- ^ The next non-Haddock-like token
 lexComments lexTokenFun = do
 
-  -- Find '-- |' comments and tok
+  -- Find '-- |', '-- $', and '-- *' comments and tokens
   (docNexts, tok @ (L realSpan _)) <- getNext []
 
   -- Peek '-- ^' comments
