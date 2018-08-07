@@ -29,7 +29,7 @@ module Parser (parseModule, parseSignature, parseImport, parseStatement, parseBa
                parseType, parseHeader) where
 
 -- base
-import Control.Monad    ( unless, liftM )
+import Control.Monad    ( unless, liftM, join )
 import GHC.Exts
 import Data.Char
 import Data.Either      ( fromLeft, fromRight )
@@ -785,11 +785,17 @@ body2   :: { ([AddAnn]
 
 top     :: { ([AddAnn]
              ,([LImportDecl GhcPs], [LHsDecl GhcPs])) }
-        : semis top1                            { ($1, $2) }
+        : semis_toks top1                       {% do { ds <- if (null (fst $2))
+                                                                then traverse removeAllDocDeclsNext (map getLoc (snd $1))
+                                                                else pure []
+                                                      ; pure (fst $1, (fst $2, join ds ++ snd $2))
+                                                      } }
 
 top1    :: { ([LImportDecl GhcPs], [LHsDecl GhcPs]) }
-        : importdecls_semi topdecls_semi        { (reverse $1, cvTopDecls $2) }
-        | importdecls_semi topdecls             { (reverse $1, cvTopDecls $2) }
+        : importdecls_semi topdecls_semi        {% do { ds <- traverse removeAllDocDeclsNext (map getLoc (snd $1))
+                                                      ; pure (reverse $ fst $1, join ds ++ cvTopDecls $2) } }
+        | importdecls_semi topdecls             {% do { ds <- traverse removeAllDocDeclsNext (map getLoc (snd $1))
+                                                      ; pure (reverse $ fst $1, join ds ++ cvTopDecls $2) } }
         | importdecls                           { (reverse $1, []) }
 
 -----------------------------------------------------------------------------
@@ -823,7 +829,7 @@ header_top :: { [LImportDecl GhcPs] }
         :  semis header_top_importdecls         { $2 }
 
 header_top_importdecls :: { [LImportDecl GhcPs] }
-        :  importdecls_semi                     { $1 }
+        :  importdecls_semi                     { fst $1 }
         |  importdecls                          { $1 }
 
 -----------------------------------------------------------------------------
@@ -920,6 +926,16 @@ semis1  :: { [AddAnn] }
 semis1  : semis1 ';'  { mj AnnSemi $2 : $1 }
         | ';'         { [mj AnnSemi $1] }
 
+semis1_toks  :: { ([AddAnn], [Located Token]) }
+semis1_toks
+        : semis1_toks ';'  { (mj AnnSemi $2 : fst $1, $2 : snd $1) }
+        | ';'              { ([mj AnnSemi $1], [$1]) }
+
+semis_toks  :: { ([AddAnn], [Located Token]) }
+semis_toks
+        : semis_toks ';'          { (mj AnnSemi $2 : fst $1, $2 : snd $1) }
+        | {- empty -}             { ([], []) }
+
 -- Zero or more semicolons
 semis   :: { [AddAnn] }
 semis   : semis ';'   { mj AnnSemi $2 : $1 }
@@ -929,14 +945,14 @@ semis   : semis ';'   { mj AnnSemi $2 : $1 }
 importdecls :: { [LImportDecl GhcPs] }
 importdecls
         : importdecls_semi importdecl
-                                { $2 : $1 }
+                                { $2 : fst $1 }
 
 -- May have trailing semicolons, can be empty
-importdecls_semi :: { [LImportDecl GhcPs] }
+importdecls_semi :: { ([LImportDecl GhcPs], [Located Token]) }
 importdecls_semi
-        : importdecls_semi importdecl semis1
-                                {% ams $2 $3 >> return ($2 : $1) }
-        | {- empty -}           { [] }
+        : importdecls_semi importdecl semis1_toks
+                                {% ams $2 (fst $3) >> return ($2 : fst $1, snd $3) }
+        | {- empty -}           { ([],[]) }
 
 importdecl :: { LImportDecl GhcPs }
         : 'import' maybe_src maybe_safe optqualified maybe_pkg modid maybeas maybeimpspec

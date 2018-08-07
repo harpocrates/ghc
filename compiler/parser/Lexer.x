@@ -2634,7 +2634,7 @@ removeCommentsNext sp func = do
       | s1 == s2 = case func toks of
                      (x, []) -> (Just x, ts)
                      (x, toks') -> (Just x, (s2, toks') : ts)
-      | s1 > s2 = (Nothing, ts)
+      | s1 > s2 = (Nothing, t : ts)
       | otherwise = let ~(mt, ts') = go s1 ts in (mt, t : ts')
 
 
@@ -2675,7 +2675,7 @@ removeCommentsPrev sp func = do
       | s1 == s2 = case func toks of
                      (x, []) -> (Just x, ts)
                      (x, toks') -> (Just x, (s2, toks') : ts)
-      | s1 > s2 = (Nothing, ts)
+      | s1 > s2 = (Nothing, t : ts)
       | otherwise = let ~(mt, ts') = go s1 ts in (mt, t : ts')
 
 
