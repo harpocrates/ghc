@@ -123,10 +123,9 @@ import BasicTypes     ( InlineSpec(..), RuleMatchInfo(..),
 
 -- compiler/parser
 import Ctype
-
+import HaddockUtils
 
 import HsDoc
-
 import ApiAnnotation
 }
 
@@ -2007,7 +2006,7 @@ data PState = PState {
         -- that follow them.
         --
         -- TODO: change to RealSrcLoc
-        comment_next, comment_prev :: [(SrcLoc, [Located Token])]
+        comment_next, comment_prev :: DocStore (Located Token)
      }
         -- last_loc and last_len are used when generating error messages,
         -- and in pushCurrentContext only.  Sigh, if only Happy passed the
@@ -2524,8 +2523,8 @@ mkPStatePure options buf loc =
       annotations = [],
       comment_q = [],
       annotations_comments = [],
-      comment_next = [],
-      comment_prev = []
+      comment_next = emptyDocStore,
+      comment_prev = emptyDocStore
     }
 
 addWarning :: WarningFlag -> SrcSpan -> SDoc -> P ()
@@ -2563,9 +2562,12 @@ mkTabWarning PState{tab_first=tf, tab_count=tc} d =
                  mkWarnMsg d (RealSrcSpan s) alwaysQualify message) tf
 
 mkHaddockWarning :: PState -> DynFlags -> [ErrMsg]
-mkHaddockWarning PState{comment_next=cn, comment_prev=cp} d = map report (snd =<< (cn ++ cp))
-  where report tk = makeIntoWarning NoReason $
-         mkWarnMsg d (getLoc tk) alwaysQualify (text "Unexpected Haddock-style comment")
+mkHaddockWarning PState{comment_next=cn, comment_prev=cp} d = map report elts
+  where
+    elts = docStoreElts cn ++ docStoreElts cp
+    msg = text "Unexpected Haddock-style comment"
+    report tk = makeIntoWarning NoReason $
+         mkWarnMsg d (getLoc tk) alwaysQualify msg
 
 
 getMessages :: PState -> DynFlags -> Messages
@@ -2615,28 +2617,20 @@ getOffside = P $ \s@PState{last_loc=loc, context=stk} ->
 
 -- Comments next
 
-getCommentsNext :: P [(SrcLoc, [Located Token])]
+getCommentsNext :: P (DocStore (Located Token))
 getCommentsNext = P $ \s@PState{ comment_next = nc } -> POk s nc
 
-setCommentsNext :: [(SrcLoc, [Located Token])] -> P ()
+setCommentsNext :: DocStore (Located Token) -> P ()
 setCommentsNext nc = P $ \s -> POk s{ comment_next = nc } ()
 
 -- | Look for and remove a '-- |' comment which
 removeCommentsNext :: Outputable a => SrcSpan -> ([Located Token] -> (a, [Located Token])) ->  P (Maybe a)
-removeCommentsNext sp func = do
+removeCommentsNext (RealSrcSpan sp) func = do
   nc <- getCommentsNext
-  let (x, nc') = go (srcSpanStart sp) nc
+  let (x, nc') = docStoreAdjust func (realSrcSpanStart sp) nc
   setCommentsNext nc'
   pure x
-  where
-    go s1 [] = (Nothing, [])
-    go s1 (t@(s2, toks) : ts)
-      | s1 == s2 = case func toks of
-                     (x, []) -> (Just x, ts)
-                     (x, toks') -> (Just x, (s2, toks') : ts)
-      | s1 > s2 = (Nothing, t : ts)
-      | otherwise = let ~(mt, ts') = go s1 ts in (mt, t : ts')
-
+removeCommentsNext (UnhelpfulSpan _) _ = pure Nothing
 
 removeLastCommentNext :: SrcSpan -> P (Maybe LHsDocString)
 removeLastCommentNext s = join <$> removeCommentsNext s go
@@ -2648,36 +2642,26 @@ removeAllCommentsNext :: SrcSpan -> P [Located Token]
 removeAllCommentsNext s = fromMaybe [] <$> removeCommentsNext s (\tks -> (reverse tks, []))
 
 addCommentsNext :: SrcLoc -> [Located Token] -> P ()
-addCommentsNext sloc ltoks = P $ \s@PState{ comment_next = nc } ->
-                                   let newNc = case nc of
-                                                 (sloc',ltoks') : nc' | sloc == sloc' -> (sloc, ltoks' ++ ltoks) : nc'
-                                                 _ -> (sloc, ltoks) : nc
-                                   in POk s{ comment_next = newNc } ()
+addCommentsNext (RealSrcLoc sloc) ltoks = P $ \s@PState{ comment_next = nc } ->
+                                                 let newNc = addToDocStore sloc ltoks nc
+                                                 in POk s{ comment_next = newNc } ()
 
 -- Comments prev
 
-getCommentsPrev :: P [(SrcLoc, [Located Token])]
+getCommentsPrev :: P (DocStore (Located Token))
 getCommentsPrev = P $ \s@PState{ comment_prev = pc } -> POk s pc
 
-setCommentsPrev :: [(SrcLoc, [Located Token])] -> P ()
+setCommentsPrev :: DocStore (Located Token) -> P ()
 setCommentsPrev pc = P $ \s -> POk s{ comment_prev = pc } ()
 
 -- | Look for and remove a '-- ^' comment which
 removeCommentsPrev :: Outputable a => SrcSpan -> ([Located Token] -> (a, [Located Token])) ->  P (Maybe a)
-removeCommentsPrev sp func = do
+removeCommentsPrev (RealSrcSpan sp) func = do
   pc <- getCommentsPrev
-  let (x, pc') = go (srcSpanEnd sp) pc
+  let (x, pc') = docStoreAdjust func (realSrcSpanEnd sp) pc
   setCommentsPrev pc'
   pure x
-  where
-    go s1 [] = (Nothing, [])
-    go s1 (t@(s2, toks) : ts)
-      | s1 == s2 = case func toks of
-                     (x, []) -> (Just x, ts)
-                     (x, toks') -> (Just x, (s2, toks') : ts)
-      | s1 > s2 = (Nothing, t : ts)
-      | otherwise = let ~(mt, ts') = go s1 ts in (mt, t : ts')
-
+removeCommentsPrev (UnhelpfulSpan _) _ = pure Nothing
 
 removeFirstCommentPrev :: SrcSpan -> P (Maybe LHsDocString)
 removeFirstCommentPrev s = join <$> removeCommentsPrev s go
@@ -2690,11 +2674,9 @@ removeAllCommentsPrev :: SrcSpan -> P [Located Token]
 removeAllCommentsPrev s = fromMaybe [] <$> removeCommentsPrev s (\tks -> (reverse tks, []))
 
 addCommentsPrev :: SrcLoc -> [Located Token] -> P ()
-addCommentsPrev sloc ltoks = P $ \s@PState{ comment_prev = pc } ->
-                                   let newPc = case pc of
-                                                 (sloc',ltoks') : pc' | sloc == sloc' -> (sloc, ltoks' ++ ltoks) : pc'
-                                                 _ -> (sloc, ltoks) : pc
-                                   in POk s{ comment_prev = newPc } ()
+addCommentsPrev (RealSrcLoc sloc) ltoks = P $ \s@PState{ comment_prev = pc } ->
+                                                 let newPc = addToDocStore sloc ltoks pc
+                                                 in POk s{ comment_prev = newPc } ()
 
 
 -- ---------------------------------------------------------------------------
