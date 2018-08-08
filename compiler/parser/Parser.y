@@ -772,9 +772,16 @@ maybemodwarning :: { Maybe (Located WarningTxt) }
 
 body    :: { ([AddAnn]
              ,([LImportDecl GhcPs], [LHsDecl GhcPs])) }
-        :  '{'            top '}'      { (moc $1:mcc $3:(fst $2)
-                                         , snd $2) }
-        |      vocurly    top close    { (fst $2, snd $2) }
+        :  '{'            top '}'      {% do { ds <- if null (fst $ snd $2)
+                                                       then removeAllDocDeclsPrev (getLoc $1)
+                                                       else pure []
+                                             ; pure (moc $1:mcc $3:(fst $2)
+                                                    , (fst $ snd $2, ds ++ (snd (snd $2)))) } }
+        |      vocurly    top close    {% do { ds <- if null (fst $ snd $2)
+                                                       then removeAllDocDeclsPrev (getLoc $1)
+                                                       else pure []
+                                             ; pure (fst $2
+                                                    , (fst $ snd $2, ds ++ (snd (snd $2)))) } }
 
 body2   :: { ([AddAnn]
              ,([LImportDecl GhcPs], [LHsDecl GhcPs])) }

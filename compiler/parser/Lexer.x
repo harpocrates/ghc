@@ -2780,29 +2780,37 @@ lexComments :: P (RealLocated Token) -- ^ How to get a token
 lexComments lexTokenFun = do
 
   -- Find '-- |', '-- $', and '-- *' comments and tokens
-  (docNexts, tok @ (L realSpan _)) <- getNext []
+  prev <- fmap isNothing getLastTk -- If there are no previous token,
+                                  -- collect '-- ^' as one of the "next"s
+  (docNexts, tok @ (L realSpan _)) <- getNext prev []
 
   -- Peek '-- ^' comments
   stashedState <- getPState
   docPrevs <- getPrev []
   setPState stashedState
 
+  -- pprTrace "tok: " (ppr tok) (pure ())
+  -- pprTrace "  next: " (ppr (reverse docNexts)) (pure ())
+  -- pprTrace "  prev: " (ppr (reverse docPrevs)) (pure ())
   addCommentsNext (RealSrcLoc (realSrcSpanStart realSpan)) (reverse docNexts)
   addCommentsPrev (RealSrcLoc (realSrcSpanEnd realSpan)) (reverse docPrevs)
 
   pure tok
 
   where
-  getNext :: [Located Token] -- ^ next '-- |' docs
+  getNext :: Bool            -- ^ get prev toks too
+          -> [Located Token] -- ^ next '-- |' docs
           -> P ([Located Token], RealLocated Token)
-  getNext acc = do
+  getNext prev acc = do
     rlTok@(L realSpan tok) <- lexTokenFun
     let lTok = L (RealSrcSpan realSpan) tok
     case tok of
-      ITdocCommentNext{}   -> getNext (lTok : acc)
-      ITdocCommentNamed{}  -> getNext (lTok : acc)
-      ITdocSection{}       -> getNext (lTok : acc)
-      ITdocCommentPrev{}   -> getNext acc
+      ITdocCommentNext{}   -> getNext prev (lTok : acc)
+      ITdocCommentNamed{}  -> getNext prev (lTok : acc)
+      ITdocSection{}       -> getNext prev (lTok : acc)
+      ITdocCommentPrev{}
+        | prev             -> getNext prev (lTok : acc)
+        | otherwise        -> getNext prev acc
       _                    -> pure (reverse acc, rlTok)
 
   getPrev :: [Located Token] -- ^ next '-- ^' docs
