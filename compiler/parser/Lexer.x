@@ -2324,7 +2324,7 @@ data ExtBits
   | BangPatBit -- Tells the parser to understand bang-patterns
                -- (doesn't affect the lexer)
   | PatternSynonymsBit -- pattern synonyms
-  | HaddockBit-- Lex and parse Haddock comments
+  | HaddockBit        -- ^ Lex Haddock comments
   | MagicHashBit -- "#" in both functions and operators
   | RecursiveDoBit -- mdo
   | UnicodeSyntaxBit -- the forall symbol, arrow symbols, etc
@@ -2335,7 +2335,11 @@ data ExtBits
   | QqBit -- enable quasiquoting
   | InRulePragBit
   | InNestedCommentBit -- See Note [Nested comment line pragmas]
-  | RawTokenStreamBit -- producing a token stream with all comments included
+  | RawTokenStreamBit -- ^ produce a token stream with all comments included
+                      --
+                      -- If Haddock is enabled, the Haddock tokens will be
+                      -- included in the output instead of going into the
+                      -- PState (as they would usually).
   | SccProfilingOnBit
   | HpcBit
   | AlternativeLayoutRuleBit
@@ -2751,13 +2755,13 @@ lexError str = do
 lexer :: Bool -> (Located Token -> P a) -> P a
 lexer queueComments cont = do
   alr <- extension alternativeLayoutRule
-  hddk <- extension haddockEnabled
   let lexTokenFun = if alr then lexTokenAlr else lexToken
-  let lexTokenFunDocs = if hddk
-                          then lexComments queueComments lexTokenFun
-                          else lexTokenFun
-  (L span tok) <- lexTokenFunDocs
-  --trace ("token: " ++ show tok) $ do
+
+  hddk <- extension haddockEnabled
+  rtok <- extension rawTokenStreamEnabled
+  (L span tok) <- if hddk && not rtok
+                    then lexComments queueComments lexTokenFun
+                    else lexTokenFun
 
   case tok of
     ITeof -> addAnnotationOnly noSrcSpan AnnEofPos (RealSrcSpan span)
@@ -2782,12 +2786,12 @@ lexComments :: Bool                  -- ^ queue comments
             -> P (RealLocated Token) -- ^ The next non-Haddock-like token
 lexComments queueComments lexTokenFun = do
 
-  -- Find '-- |', '-- $', and '-- *' comments and tokens
-  prev <- fmap isNothing getLastTk -- If there are no previous token,
+  -- Find '-- |', '-- $', and '-- *' doc comments
+  prev <- fmap isNothing getLastTk -- If there are no previous tokens,
                                   -- collect '-- ^' as one of the "next"s
   (docNexts, tok @ (L realSpan _)) <- getNext prev []
 
-  -- Peek '-- ^' comments
+  -- Peek '-- ^' doc comments
   stashedState <- getPState
   docPrevs <- getPrev []
   setPState stashedState
@@ -2801,18 +2805,17 @@ lexComments queueComments lexTokenFun = do
   pure tok
 
   where
-  getNext :: Bool            -- ^ get prev toks too
-          -> [Located Token] -- ^ next '-- |' docs
+  -- | Get all doc comments that should be attached to the next token
+  getNext :: Bool            -- ^ get comments attached to previous token too
+          -> [Located Token] -- ^ accumulated tokens (reversed)
           -> P ([Located Token], RealLocated Token)
   getNext prev acc = do
     rlTok@(L realSpan tok) <- lexTokenFun
     let lTok = L (RealSrcSpan realSpan) tok
 
-    when (queueComments && isDocComment tok) $
-      queueComment lTok
-
-    when (queueComments && isComment tok) $
-      queueComment lTok
+    if (queueComments && isDocComment tok)
+      then queueComment lTok
+      else return ()
 
     case tok of
       ITdocCommentNext{}   -> getNext prev (lTok : acc)
@@ -2821,9 +2824,12 @@ lexComments queueComments lexTokenFun = do
       ITdocCommentPrev{}
         | prev             -> getNext prev (lTok : acc)
         | otherwise        -> getNext prev acc
-      _                    -> pure (reverse acc, rlTok)
+      _ | queueComments
+        , isComment tok    -> queueComment lTok *> getNext prev acc
+        | otherwise        -> pure (reverse acc, rlTok)
 
-  getPrev :: [Located Token] -- ^ next '-- ^' docs
+  -- | Get all doc comments that should be attached to the previous token
+  getPrev :: [Located Token] -- ^ accumulated tokens (reversed)
           -> P [Located Token]
   getPrev acc = do
     rlTok@(L realSpan tok) <- lexTokenFun
