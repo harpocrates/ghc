@@ -2753,7 +2753,9 @@ lexer queueComments cont = do
   alr <- extension alternativeLayoutRule
   hddk <- extension haddockEnabled
   let lexTokenFun = if alr then lexTokenAlr else lexToken
-  let lexTokenFunDocs = if hddk then lexComments lexTokenFun else lexTokenFun
+  let lexTokenFunDocs = if hddk
+                          then lexComments queueComments lexTokenFun
+                          else lexTokenFun
   (L span tok) <- lexTokenFunDocs
   --trace ("token: " ++ show tok) $ do
 
@@ -2775,9 +2777,10 @@ lexer queueComments cont = do
 -- stores.
 --
 -- See Note [Haddock tokens].
-lexComments :: P (RealLocated Token) -- ^ How to get a token
+lexComments :: Bool                  -- ^ queue comments
+            -> P (RealLocated Token) -- ^ How to get a token
             -> P (RealLocated Token) -- ^ The next non-Haddock-like token
-lexComments lexTokenFun = do
+lexComments queueComments lexTokenFun = do
 
   -- Find '-- |', '-- $', and '-- *' comments and tokens
   prev <- fmap isNothing getLastTk -- If there are no previous token,
@@ -2804,6 +2807,13 @@ lexComments lexTokenFun = do
   getNext prev acc = do
     rlTok@(L realSpan tok) <- lexTokenFun
     let lTok = L (RealSrcSpan realSpan) tok
+
+    when (queueComments && isDocComment tok) $
+      queueComment lTok
+
+    when (queueComments && isComment tok) $
+      queueComment lTok
+
     case tok of
       ITdocCommentNext{}   -> getNext prev (lTok : acc)
       ITdocCommentNamed{}  -> getNext prev (lTok : acc)
