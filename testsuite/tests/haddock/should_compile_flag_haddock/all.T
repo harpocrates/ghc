@@ -42,7 +42,9 @@ test('haddockA032', normal, compile, ['-haddock -ddump-parsed'])
 test('haddockA035', normal, compile, ['-haddock -ddump-parsed'])
 test('haddockA036', normal, compile, ['-haddock -ddump-parsed'])
 test('haddockA037', normal, compile, ['-haddock -ddump-parsed'])
-test('haddockA038', normal, compile, ['-haddock -ddump-parsed'])
+test('haddockA039', normal, compile, ['-haddock -ddump-parsed'])
+test('haddockA040', normal, compile, ['-haddock -ddump-parsed'])
+test('haddockA041', normal, compile, ['-haddock -ddump-parsed'])
 
 # The tests below this line are not duplicated in
 # should_compile_noflag_haddock.

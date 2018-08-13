@@ -1,0 +1,13 @@
+
+==================== Parser ====================
+module MisplacedHadddocks where
+data A = A
+data B = B
+f1 :: A " comment 1" -> B " comment 2"
+f1 A = B
+
+
+
+haddockA040.hs:6:4: warning: Unexpected Haddock-style comment
+
+haddockA040.hs:9:4: warning: Unexpected Haddock-style comment
