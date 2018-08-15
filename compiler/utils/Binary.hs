@@ -4,6 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE LambdaCase #-}
 
 {-# OPTIONS_GHC -O2 -funbox-strict-fields #-}
 -- We always optimise this, otherwise performance of a non-optimised
@@ -53,6 +54,8 @@ module Binary
    UserData(..), getUserData, setUserData,
    newReadState, newWriteState,
    putDictionary, getDictionary, putFS,
+
+   NonDetKeyMap(..)
   ) where
 
 #include "HsVersions.h"
@@ -78,12 +81,18 @@ import qualified Data.ByteString.Internal as BS
 import qualified Data.ByteString.Unsafe   as BS
 import Data.IORef
 import Data.Char                ( ord, chr )
+import Data.List.NonEmpty       ( NonEmpty(..))
+import qualified Data.List.NonEmpty as NonEmpty
+import Data.Map                 ( Map )
+import qualified Data.Map as Map
+import Data.Set                 ( Set )
+import qualified Data.Set as Set
 import Data.Time
 import Type.Reflection
 import Type.Reflection.Unsafe
 import Data.Kind (Type)
 import GHC.Exts (TYPE, RuntimeRep(..), VecCount(..), VecElem(..))
-import Control.Monad            ( when )
+import Control.Monad            ( (<$!>), when )
 import System.IO as IO
 import System.IO.Unsafe         ( unsafeInterleaveIO )
 import System.IO.Error          ( mkIOError, eofErrorType )
@@ -408,6 +417,10 @@ instance Binary a => Binary [a] where
         let loop 0 = return []
             loop n = do a <- get bh; as <- loop (n-1); return (a:as)
         loop len
+
+instance Binary a => Binary (NonEmpty a) where
+    put_ bh = put_ bh . NonEmpty.toList
+    get bh = NonEmpty.fromList <$> get bh
 
 instance (Binary a, Binary b) => Binary (a,b) where
     put_ bh (a,b) = do put_ bh a; put_ bh b
@@ -1085,25 +1098,21 @@ instance Binary Fixity where
           ab <- get bh
           return (Fixity src aa ab)
 
-instance Binary WarningTxt where
-    put_ bh (WarningTxt s w) = do
-            putByte bh 0
-            put_ bh s
-            put_ bh w
-    put_ bh (DeprecatedTxt s d) = do
-            putByte bh 1
-            put_ bh s
-            put_ bh d
+-- | Ignores source locations and 'SourceText's.
+instance Binary text => Binary (WarningTxt text) where
+  put_ bh w = do
+    let (sort_, ws) = warningTxtContents w
+    put_ bh sort_
+    put_ bh ws
+  get bh = do
+    sort_ <- get bh
+    ws <- get bh
+    let box = noLoc . noSourceText
+    pure (WarningTxt (box sort_) (map box ws))
 
-    get bh = do
-            h <- getByte bh
-            case h of
-              0 -> do s <- get bh
-                      w <- get bh
-                      return (WarningTxt s w)
-              _ -> do s <- get bh
-                      d <- get bh
-                      return (DeprecatedTxt s d)
+instance Binary WarningSort where
+  put_ bh = putWord8 bh . fromIntegral . fromEnum
+  get  bh = toEnum . fromIntegral <$!> getWord8 bh
 
 instance Binary StringLiteral where
   put_ bh (StringLiteral st fs) = do
@@ -1127,11 +1136,7 @@ instance Binary a => Binary (GenLocated SrcSpan a) where
 instance Binary SrcSpan where
   put_ bh (RealSrcSpan ss) = do
           putByte bh 0
-          put_ bh (srcSpanFile ss)
-          put_ bh (srcSpanStartLine ss)
-          put_ bh (srcSpanStartCol ss)
-          put_ bh (srcSpanEndLine ss)
-          put_ bh (srcSpanEndCol ss)
+          put_ bh ss
 
   put_ bh (UnhelpfulSpan s) = do
           putByte bh 1
@@ -1149,6 +1154,23 @@ instance Binary SrcSpan where
                                       (mkSrcLoc f el ec))
             _ -> do s <- get bh
                     return (UnhelpfulSpan s)
+
+instance Binary RealSrcSpan where
+  put_ bh ss = do
+          put_ bh (srcSpanFile ss)
+          put_ bh (srcSpanStartLine ss)
+          put_ bh (srcSpanStartCol ss)
+          put_ bh (srcSpanEndLine ss)
+          put_ bh (srcSpanEndCol ss)
+  get bh = do
+          f <- get bh
+          sl <- get bh
+          sc <- get bh
+          el <- get bh
+          ec <- get bh
+          let sloc = mkRealSrcLoc f sl sc
+              eloc = mkRealSrcLoc f el ec
+          pure (mkRealSrcSpan sloc eloc)
 
 instance Binary Serialized where
     put_ bh (Serialized the_type bytes) = do
@@ -1173,3 +1195,29 @@ instance Binary SourceText where
         s <- get bh
         return (SourceText s)
       _ -> panic $ "Binary SourceText:" ++ show h
+
+--------------------------------------------------------------------------------
+-- Instances for the containers package
+--------------------------------------------------------------------------------
+
+-- | Assumes a deterministic 'Ord' instance.
+--
+-- So don't use this for a @('Map' 'Name' X)@ for example.
+instance (Binary k, Binary v) => Binary (Map k v) where
+  put_ bh m = put_ bh (Map.toAscList m)
+  get bh = Map.fromDistinctAscList <$> get bh
+
+-- | Assumes a deterministic 'Ord' instance.
+--
+-- So don't use this for a @('Set' 'Name')@ for example.
+instance Binary a => Binary (Set a) where
+  put_ bh s = put_ bh (Set.toAscList s)
+  get bh = Set.fromDistinctAscList <$> get bh
+
+-- | Provides a 'Binary' instance for 'Map's where the key has a
+-- non-deterministic 'Ord' instance.
+newtype NonDetKeyMap k v = NonDetKeyMap { unNonDetKeyMap :: Map k v }
+
+instance (Binary k, Binary v, Ord k) => Binary (NonDetKeyMap k v) where
+  put_ bh (NonDetKeyMap m) = put_ bh (Map.toList m)
+  get bh = NonDetKeyMap . Map.fromList <$> get bh

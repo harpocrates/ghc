@@ -52,7 +52,7 @@ import RdrHsSyn        ( setRdrNameSpace )
 import Outputable
 import Maybes
 import SrcLoc
-import BasicTypes      ( TopLevelFlag(..), StringLiteral(..) )
+import BasicTypes      ( TopLevelFlag(..), StringLiteral(..), WarningSort(..), warningTxtContents )
 import Util
 import FastString
 import FastStringEnv
@@ -1709,14 +1709,16 @@ missingImportListItem :: IE GhcPs -> SDoc
 missingImportListItem ie
   = text "The import item" <+> quotes (ppr ie) <+> ptext (sLit "does not have an explicit import list")
 
-moduleWarn :: ModuleName -> WarningTxt -> SDoc
-moduleWarn mod (WarningTxt _ txt)
-  = sep [ text "Module" <+> quotes (ppr mod) <> ptext (sLit ":"),
-          nest 2 (vcat (map (ppr . sl_fs . unLoc) txt)) ]
-moduleWarn mod (DeprecatedTxt _ txt)
-  = sep [ text "Module" <+> quotes (ppr mod)
-                                <+> text "is deprecated:",
-          nest 2 (vcat (map (ppr . sl_fs . unLoc) txt)) ]
+moduleWarn :: ModuleName -> WarningTxt HsDoc' -> SDoc
+moduleWarn mod w
+  = sep [ text "Module" <+> quotes (ppr mod) <> deprecated <> char ':',
+          nest 2 (vcat (map (text . unpackHDS . hsDocString) txt)) ]
+  where
+    (sort_, txt) = warningTxtContents w
+    deprecated =
+      case sort_ of
+        WsWarning -> empty
+        WsDeprecated -> text " is deprecated"
 
 packageImportErr :: SDoc
 packageImportErr

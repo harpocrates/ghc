@@ -18,6 +18,8 @@ module Encoding (
         utf8CharStart,
         utf8DecodeChar,
         utf8DecodeByteString,
+        utf8DecodeByteStringChar,
+        utf8SplitAtByteString,
         utf8DecodeStringLazy,
         utf8EncodeChar,
         utf8EncodeString,
@@ -43,6 +45,7 @@ import Numeric
 import GHC.IO
 
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BS
 
 import GHC.Exts
@@ -143,6 +146,29 @@ utf8DecodeStringLazy fptr offset len
                   rest <- unsafeDupableInterleaveIO $ unpack (p `plusPtr#` nBytes#)
                   return (C# c# : rest)
 
+-- | Return the first UTF8-encoded 'Char' and its length in bytes, if the
+-- 'ByteString' is non-empty.
+
+-- TODO: Make this faster
+utf8DecodeByteStringChar
+    :: ByteString
+    -> Maybe (Char, Int)
+utf8DecodeByteStringChar bs =
+    case utf8DecodeByteString bs of
+      [] -> Nothing
+      (c : _) -> Just (c, utf8EncodedCharLength c)
+
+-- | Split after a given number of characters.
+-- Negative values are treated as if they are 0.
+utf8SplitAtByteString :: Int -> ByteString -> (ByteString, ByteString)
+utf8SplitAtByteString x bs = loop 0 x bs
+  where
+    loop a n _ | n <= 0 = BS.splitAt a bs
+    loop a n bs1 =
+        case utf8DecodeByteStringChar bs1 of
+          Just (_,y) -> loop (a+y) (n-1) (BS.drop y bs1)
+          Nothing    -> (bs, BS.empty)
+
 countUTF8Chars :: Ptr Word8 -> Int -> IO Int
 countUTF8Chars ptr len = go ptr 0
   where
@@ -195,11 +221,17 @@ utf8EncodeString ptr str = go ptr str
 utf8EncodedLength :: String -> Int
 utf8EncodedLength str = go 0 str
   where go !n [] = n
-        go n (c:cs)
-          | ord c > 0 && ord c <= 0x007f = go (n+1) cs
-          | ord c <= 0x07ff = go (n+2) cs
-          | ord c <= 0xffff = go (n+3) cs
-          | otherwise       = go (n+4) cs
+        go n (c:cs) = go (n + utf8EncodedCharLength c) cs
+
+-- TODO: What's the rationale for returning 4 for '\NUL'?
+utf8EncodedCharLength :: Char -> Int
+utf8EncodedCharLength c
+  | n > 0 && n <= 0x007f = 1
+  | n <= 0x07ff          = 2
+  | n <= 0xffff          = 3
+  | otherwise            = 4
+  where n = ord c
+{-# INLINE utf8EncodedCharLength #-}
 
 -- -----------------------------------------------------------------------------
 -- The Z-encoding

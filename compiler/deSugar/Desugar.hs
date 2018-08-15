@@ -94,7 +94,6 @@ deSugar hsc_env
                             tcg_inst_env     = inst_env,
                             tcg_fam_inst_env = fam_inst_env,
                             tcg_merged       = merged,
-                            tcg_warns        = warns,
                             tcg_anns         = anns,
                             tcg_binds        = binds,
                             tcg_imp_specs    = imp_specs,
@@ -168,8 +167,8 @@ deSugar hsc_env
 
         ; let used_names = mkUsedNames tcg_env
               pluginModules =
-                map lpModule (plugins (hsc_dflags hsc_env))
-        ; deps <- mkDependencies (thisInstalledUnitId (hsc_dflags hsc_env))
+                map lpModule (plugins dflags)
+        ; deps <- mkDependencies (thisInstalledUnitId dflags)
                                  (map mi_module pluginModules) tcg_env
 
         ; used_th <- readIORef tc_splice_used
@@ -185,9 +184,9 @@ deSugar hsc_env
 
         ; foreign_files <- readIORef th_foreign_files_var
 
-        ; let (doc_hdr, decl_docs, arg_docs) = extractDocs tcg_env
+        ; let (warns, docs) = extractDocs dflags tcg_env
 
-        ; let mod_guts = ModGuts {
+              mod_guts = ModGuts {
                 mg_module       = mod,
                 mg_hsc_src      = hsc_src,
                 mg_loc          = mkFileSrcSpan mod_loc,
@@ -214,9 +213,7 @@ deSugar hsc_env
                 mg_safe_haskell = safe_mode,
                 mg_trust_pkg    = imp_trust_own_pkg imports,
                 mg_complete_sigs = complete_matches,
-                mg_doc_hdr      = doc_hdr,
-                mg_decl_docs    = decl_docs,
-                mg_arg_docs     = arg_docs
+                mg_docs         = docs
               }
         ; return (msgs, Just mod_guts)
         }}}}

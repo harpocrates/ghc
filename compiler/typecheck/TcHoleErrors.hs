@@ -39,7 +39,7 @@ import TcUnify       ( tcSubType_NC )
 
 import ExtractDocs ( extractDocs )
 import qualified Data.Map as Map
-import HsDoc           ( HsDocString, unpackHDS, DeclDocMap(..) )
+import HsDoc           ( HsDoc(..), HsDocString, unpackHDS, Docs(..) )
 import HscTypes        ( ModIface(..) )
 import LoadIface       ( loadInterfaceForNameMaybe )
 
@@ -473,20 +473,23 @@ addDocs :: [HoleFit] -> TcM [HoleFit]
 addDocs fits =
   do { showDocs <- goptM Opt_ShowDocsOfHoleFits
      ; if showDocs
-       then do { (_, DeclDocMap lclDocs, _) <- extractDocs <$> getGblEnv
+       then do { dflags <- getDynFlags
+               ; (_, mb_docs) <- extractDocs dflags <$> getGblEnv
+                 -- TODO: We might want to emit a warning if mb_docs is Nothing
+               ; let lclDocs = maybe Map.empty docs_decls mb_docs
                ; mapM (upd lclDocs) fits }
        else return fits }
   where
    msg = text "TcHoleErrors addDocs"
-   lookupInIface name (ModIface { mi_decl_docs = DeclDocMap dmap })
-     = Map.lookup name dmap
+   lookupInIface name (ModIface { mi_docs = mb_docs })
+     = Map.lookup name . docs_decls =<< mb_docs
    upd lclDocs fit =
      let name = hfName fit in
      do { doc <- if hfIsLcl fit
                  then pure (Map.lookup name lclDocs)
                  else do { mbIface <- loadInterfaceForNameMaybe msg name
                          ; return $ mbIface >>= lookupInIface name }
-        ; return $ fit {hfDoc = doc} }
+        ; return $ fit {hfDoc = hsDocString <$> doc} }
 
 -- For pretty printing hole fits, we display the name and type of the fit,
 -- with added '_' to represent any extra arguments in case of a non-zero

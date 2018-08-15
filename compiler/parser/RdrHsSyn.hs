@@ -371,7 +371,7 @@ cvBindGroup binding
 
 cvBindsAndSigs :: OrdList (LHsDecl GhcPs)
   -> P (LHsBinds GhcPs, [LSig GhcPs], [LFamilyDecl GhcPs]
-          , [LTyFamInstDecl GhcPs], [LDataFamInstDecl GhcPs], [LDocDecl])
+          , [LTyFamInstDecl GhcPs], [LDataFamInstDecl GhcPs], [LDocDecl GhcPs])
 -- Input decls contain just value bindings and signatures
 -- and in case of class or instance declarations also
 -- associated type declarations. They might also contain Haddock comments.
@@ -494,7 +494,7 @@ this is easy for the parser to produce and we avoid the overhead of unrolling
 splitCon :: [LHsType GhcPs]
       -> P ( Located RdrName         -- constructor name
            , HsConDeclDetails GhcPs  -- constructor field information
-           , Maybe LHsDocString      -- docstring to go on the constructor
+           , Maybe (LHsDoc RdrName)  -- docstring to go on the constructor
            )
 -- See Note [Parsing data constructors is hard]
 -- This gets given a "type" that should look like
@@ -556,7 +556,7 @@ tyConToDataCon loc tc
 
 -- | Split a type to extract the trailing doc string (if there is one) from a
 -- type produced by the 'btype_no_ops' production.
-splitDocTy :: LHsType GhcPs -> (LHsType GhcPs, Maybe LHsDocString)
+splitDocTy :: LHsType GhcPs -> (LHsType GhcPs, Maybe (LHsDoc RdrName))
 splitDocTy (L l (HsAppTy x t1 t2)) = (L l (HsAppTy x t1 t2'), ds)
   where ~(t2', ds) = splitDocTy t2
 splitDocTy (L _ (HsDocTy _ ty ds)) = (ty, Just ds)
@@ -565,7 +565,7 @@ splitDocTy ty = (ty, Nothing)
 -- | Given a type that is a field to an infix data constructor, try to split
 -- off a trailing docstring on the type, and check that there are no other
 -- docstrings.
-checkInfixConstr :: LHsType GhcPs -> P (LHsType GhcPs, Maybe LHsDocString)
+checkInfixConstr :: LHsType GhcPs -> P (LHsType GhcPs, Maybe (LHsDoc RdrName))
 checkInfixConstr ty = checkNoDocs msg ty' *> pure (ty', doc_string)
   where (ty', doc_string) = splitDocTy ty
         msg = text "infix constructor field"
