@@ -270,6 +270,11 @@ data IfaceBang
 data IfaceSrcBang
   = IfSrcBang SrcUnpackedness SrcStrictness
 
+-- | This is analogous to 'IfExtName', but with an additional guarantee that
+-- the location attached to the name will get serialized/deserialized in the
+-- 'Binary' instance.
+newtype IfExtNameAndLoc = IfExtNameAndLoc IfExtName
+
 data IfaceClsInst
   = IfaceClsInst { ifInstCls  :: IfExtName,                -- See comments with
                    ifInstTys  :: [Maybe IfaceTyCon],       -- the defn of ClsInst
@@ -1933,17 +1938,26 @@ instance Binary IfaceSrcBang where
          a2 <- get bh
          return (IfSrcBang a1 a2)
 
+instance Binary IfExtNameAndLoc where
+    put_ bh (IfExtNameAndLoc n) = do
+        put_ bh n
+        put_ bh (nameSrcSpan n)
+    get bh = do
+        n <- get bh
+        sp <- get bh
+        return (IfExtNameAndLoc (setNameLoc n sp))
+
 instance Binary IfaceClsInst where
     put_ bh (IfaceClsInst cls tys dfun flag orph) = do
         put_ bh cls
         put_ bh tys
-        put_ bh dfun
+        put_ bh (IfExtNameAndLoc dfun)
         put_ bh flag
         put_ bh orph
     get bh = do
         cls  <- get bh
         tys  <- get bh
-        dfun <- get bh
+        IfExtNameAndLoc dfun <- get bh
         flag <- get bh
         orph <- get bh
         return (IfaceClsInst cls tys dfun flag orph)
@@ -1952,12 +1966,12 @@ instance Binary IfaceFamInst where
     put_ bh (IfaceFamInst fam tys name orph) = do
         put_ bh fam
         put_ bh tys
-        put_ bh name
+        put_ bh (IfExtNameAndLoc name)
         put_ bh orph
     get bh = do
         fam      <- get bh
         tys      <- get bh
-        name     <- get bh
+        IfExtNameAndLoc name <- get bh
         orph     <- get bh
         return (IfaceFamInst fam tys name orph)
 

@@ -1007,7 +1007,13 @@ tcIfaceInst (IfaceClsInst { ifDFun = dfun_name, ifOFlag = oflag
                           , ifInstCls = cls, ifInstTys = mb_tcs
                           , ifInstOrph = orph })
   = do { dfun <- forkM (text "Dict fun" <+> ppr dfun_name) $
-                    fmap tyThingId (tcIfaceImplicit dfun_name)
+                   do { vid <- fmap tyThingId (tcIfaceImplicit dfun_name)
+                      ; let loc = nameSrcSpan dfun_name
+                            vname = Var.varName vid
+                      ; pure $ if isGoodSrcSpan (nameSrcSpan vname)
+                                 then vid 
+                                 else setVarName vid (setNameLoc vname loc) }
+                      
        ; let mb_tcs' = map (fmap ifaceTyConName) mb_tcs
        ; return (mkImportedInstance cls mb_tcs' dfun_name dfun oflag orph) }
 
@@ -1015,7 +1021,13 @@ tcIfaceFamInst :: IfaceFamInst -> IfL FamInst
 tcIfaceFamInst (IfaceFamInst { ifFamInstFam = fam, ifFamInstTys = mb_tcs
                              , ifFamInstAxiom = axiom_name } )
     = do { axiom' <- forkM (text "Axiom" <+> ppr axiom_name) $
-                     tcIfaceCoAxiom axiom_name
+                       do { ax <- tcIfaceCoAxiom axiom_name
+                          ; let loc = nameSrcSpan axiom_name
+                                aname = co_ax_name ax
+                          ; pure $ if isGoodSrcSpan (nameSrcSpan aname)
+                                     then ax
+                                     else ax { co_ax_name = setNameLoc aname loc } }
+                     
              -- will panic if branched, but that's OK
          ; let axiom'' = toUnbranchedAxiom axiom'
                mb_tcs' = map (fmap ifaceTyConName) mb_tcs
