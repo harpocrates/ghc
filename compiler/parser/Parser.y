@@ -87,7 +87,7 @@ import GhcPrelude
 import qualified GHC.LanguageExtensions as LangExt
 }
 
-%expect 235 -- shift/reduce conflicts
+%expect 237 -- shift/reduce conflicts
 
 {- Last updated: 04 June 2018
 
@@ -1804,6 +1804,8 @@ ctype   :: { LHsType GhcPs }
                                                      , hst_body = $3 }) }
         | ipvar '::' type             {% ams (sLL $1 $> (HsIParamTy noExt $1 $3))
                                              [mu AnnDcolon $2] }
+        | type '::' kind              {% ams (sLL $1 $> $ HsKindSig noExt $1 $3)
+                                             [mu AnnDcolon $2] }
         | type                        { $1 }
 
 ----------------------
@@ -1830,6 +1832,8 @@ ctypedoc :: { LHsType GhcPs }
                                                      , hst_xqual = noExt
                                                      , hst_body = $3 }) }
         | ipvar '::' type             {% ams (sLL $1 $> (HsIParamTy noExt $1 $3))
+                                             [mu AnnDcolon $2] }
+        | type '::' kind              {% ams (sLL $1 $> $ HsKindSig noExt $1 $3)
                                              [mu AnnDcolon $2] }
         | typedoc                     { $1 }
 
@@ -1965,8 +1969,6 @@ atype :: { LHsType GhcPs }
                                              [mo $1,mc $3] }
         | '[' ctype ']'               {% ams (sLL $1 $> $ HsListTy  noExt $2) [mos $1,mcs $3] }
         | '(' ctype ')'               {% ams (sLL $1 $> $ HsParTy   noExt $2) [mop $1,mcp $3] }
-        | '(' ctype '::' kind ')'     {% ams (sLL $1 $> $ HsKindSig noExt $2 $4)
-                                             [mop $1,mu AnnDcolon $3,mcp $5] }
         | quasiquote                  { sL1 $1 (HsSpliceTy noExt (unLoc $1) ) }
         | '$(' exp ')'                {% ams (sLL $1 $> $ mkHsSpliceTy HasParens $2)
                                              [mj AnnOpenPE $1,mj AnnCloseP $3] }
