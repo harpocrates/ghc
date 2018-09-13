@@ -289,8 +289,8 @@ mergeAsts xs@(a:as) ys@(b:bs)
   | nodeSpan a `containsSpan` nodeSpan b = mergeAsts (combineAst a b : as) bs
   | nodeSpan b `containsSpan` nodeSpan a = mergeAsts as (combineAst a b : bs)
   | nodeSpan a `rightOf` nodeSpan b = b : mergeAsts xs bs
-  | nodeSpan a `leftOf`  nodeSpan b = a : mergeAsts as ys
-  | otherwise = error $ "mergeAsts: Spans overlapping"
+  | otherwise {- nodeSpan a `leftOf`  nodeSpan b -} = a : mergeAsts as ys
+  | otherwise = error $ "mergeAsts: Spans overlapping: " ++ show (nodeSpan a) ++ " and " ++ show (nodeSpan b)
 
 rightOf :: Span -> Span -> Bool
 rightOf s1 s2
