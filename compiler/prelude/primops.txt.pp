@@ -243,17 +243,26 @@ primop   IntQuotRemOp "quotRemInt#"    GenPrimOp
    with can_fail = True
 
 primop   AndIOp   "andI#"   Dyadic    Int# -> Int# -> Int#
+   {Bitwise "and"}
    with commutable = True
 
 primop   OrIOp   "orI#"     Dyadic    Int# -> Int# -> Int#
+   {Bitwise "or"}
    with commutable = True
 
 primop   XorIOp   "xorI#"   Dyadic    Int# -> Int# -> Int#
+   {Bitwise "xor"}
    with commutable = True
 
 primop   NotIOp   "notI#"   Monadic   Int# -> Int#
+   {Bitwise "not", or the complement}
 
 primop   IntNegOp    "negateInt#"    Monadic   Int# -> Int#
+   {Unary negation.
+    Since the most negative {\tt Int#} range extends one further than the
+    positive range, {\tt negateInt#} of the most negative number is an
+    identity operation. This way, {\tt negateInt#} is always its own inverse.}
+
 primop   IntAddCOp   "addIntC#"    GenPrimOp   Int# -> Int# -> (# Int#, Int# #)
          {Add signed integers reporting overflow.
           First member of result is the sum truncated to an {\tt Int#};
@@ -2963,29 +2972,28 @@ primop  DataToTagOp "dataToTag#" GenPrimOp
 primop  TagToEnumOp "tagToEnum#" GenPrimOp
    Int# -> a
 
-{- Note [dataToTag#]
-~~~~~~~~~~~~~~~~~~~~
-The dataToTag# primop should always be applied to an evaluated argument.
-The way to ensure this is to invoke it via the 'getTag' wrapper in GHC.Base:
-   getTag :: a -> Int#
-   getTag !x = dataToTag# x
-
-But now consider
-    \z. case x of y -> let v = dataToTag# y in ...
-
-To improve floating, the FloatOut pass (deliberately) does a
-binder-swap on the case, to give
-    \z. case x of y -> let v = dataToTag# x in ...
-
-Now FloatOut might float that v-binding outside the \z.  But that is
-bad because that might mean x gets evaluated much too early!  (CorePrep
-adds an eval to a dataToTag# call, to ensure that the argument really is
-evaluated; see CorePrep Note [dataToTag magic].)
-
-Solution: make DataToTag into a can_fail primop.  That will stop it floating
-(see Note [PrimOp can_fail and has_side_effects] in PrimOp).  It's a bit of
-a hack but never mind.
--}
+-- Note [dataToTag#]
+-- ~~~~~~~~~~~~~~~~~~~~
+-- The dataToTag# primop should always be applied to an evaluated argument.
+-- The way to ensure this is to invoke it via the 'getTag' wrapper in GHC.Base:
+--    getTag :: a -> Int#
+--    getTag !x = dataToTag# x
+-- 
+-- But now consider
+--     \z. case x of y -> let v = dataToTag# y in ...
+-- 
+-- To improve floating, the FloatOut pass (deliberately) does a
+-- binder-swap on the case, to give
+--     \z. case x of y -> let v = dataToTag# x in ...
+-- 
+-- Now FloatOut might float that v-binding outside the \z.  But that is
+-- bad because that might mean x gets evaluated much too early!  (CorePrep
+-- adds an eval to a dataToTag# call, to ensure that the argument really is
+-- evaluated; see CorePrep Note [dataToTag magic].)
+-- 
+-- Solution: make DataToTag into a can_fail primop.  That will stop it floating
+-- (see Note [PrimOp can_fail and has_side_effects] in PrimOp).  It's a bit of
+-- a hack but never mind.
 
 ------------------------------------------------------------------------
 section "Bytecode operations"

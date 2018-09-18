@@ -338,8 +338,10 @@ gen_hs_source (Info defaults entries) =
 
            unlatex s = case s of
                 '\\':'t':'e':'x':'t':'t':'t':'{':cs -> markup "@" "@" cs
+                '{':'\\':'t':'e':'x':'t':'t':'t':' ':cs -> markup "@" "@" cs
                 '{':'\\':'t':'t':cs -> markup "@" "@" cs
                 '{':'\\':'i':'t':cs -> markup "/" "/" cs
+                '{':'\\':'e':'m':cs -> markup "/" "/" cs
                 c : cs -> c : unlatex cs
                 [] -> []
            markup s t xs = s ++ mk (dropWhile isSpace xs)
