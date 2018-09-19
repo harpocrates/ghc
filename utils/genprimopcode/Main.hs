@@ -261,7 +261,7 @@ gen_hs_source (Info defaults entries) =
     ++ "-}\n"
     ++ "import GHC.Types (Coercible)\n"
 
-    ++ "default ()"  -- If we don't say this then the default type include Integer
+    ++ "default ()\n"-- If we don't say this then the default type include Integer
                      -- so that runs off and loads modules that are not part of
                      -- package ghc-prim at all.  And that in turn somehow ends up
                      -- with Declaration for $fEqMaybe:
@@ -303,28 +303,47 @@ gen_hs_source (Info defaults entries) =
            sec s = "\n-- * " ++ escape (title s) ++ "\n"
                         ++ (unlines $ map ("-- " ++ ) $ lines $ unlatex $ escape $ "|" ++ desc s) ++ "\n"
 
-           spec o = comm : decls
-             where decls = case o of  -- See Note [Placeholder declarations]
-                        PrimOpSpec { name = n, ty = t, opts = options } ->
-                            prim_fixity n options ++ prim_decl n t
-                        PrimVecOpSpec { name = n, ty = t, opts = options } ->
-                            prim_fixity n options ++ prim_decl n t
-                        PseudoOpSpec { name = n, ty = t } ->
-                            prim_decl n t
-                        PrimTypeSpec { ty = t }   ->
-                            [ "data " ++ pprTy t ]
-                        PrimVecTypeSpec { ty = t }   ->
-                            [ "data " ++ pprTy t ]
-                        Section { } -> []
+           spec o = [ "" ] ++ comm ++ depr ++ fxty ++ decls
+             where fxty  = prim_fixity (name o) (opts o)
+
+                   decls = case o of  -- See Note [Placeholder declarations]
+                        PrimOpSpec { name = n, ty = t }    -> prim_func n t
+                        PrimVecOpSpec { name = n, ty = t } -> prim_func n t
+                        PseudoOpSpec { name = n, ty = t }  -> prim_func n t
+                        PrimTypeSpec { ty = t }    -> prim_data t
+                        PrimVecTypeSpec { ty = t } -> prim_data t
+                        Section { } -> error "Section is not an entity"
 
                    comm = case (desc o) of
-                        [] -> ""
-                        d -> "\n" ++ (unlines $ map ("-- " ++ ) $ lines $ unlatex $ escape $ "|" ++ d)
+                        [] -> []
+                        d -> map ("-- " ++ ) $ (lines . unlatex . escape $ "|" ++ d) ++ extra
+
+                   extra = case on_llvm_only (opts o) ++ can_fail (opts o) of
+                        [m1,m2] -> [ "", "This " ++ m1 ++ " and " ++ m2 ++ "." ]
+                        [m] -> [ "", "This " ++ m ++ "." ]
+                        _ -> []
+
+
+                   depr = prim_deprecated (name o) (opts o)
+
+           on_llvm_only options = case lookup_attrib "llvm_only" options of
+             Just (OptionTrue _) -> [ "is only available on LLVM" ]
+             _ -> []
+
+           can_fail options = case lookup_attrib "can_fail" options of
+             Just (OptionTrue _) -> [ "can fail with an unchecked exception" ]
+             _ -> []
 
            prim_fixity n options = [ pprFixity fixity n | OptionFixity (Just fixity) <- options ]
 
-           prim_decl n t = [ wrapOp n ++ " :: " ++ pprTy t,
+           prim_func n t = [ wrapOp n ++ " :: " ++ pprTy t,
                              wrapOp n ++ " = " ++ wrapOpRhs n ]
+           prim_data t = [ "data " ++ pprTy t ]
+
+           prim_deprecated n options = case lookup_attrib "deprecated_msg" options of
+             Just (OptionString _ msg) -> [ "{-# DEPRECATED " ++ wrapOp n ++
+                                            " \"" ++ msg ++ "\" #-}" ]
+             _ -> []
 
            wrapOp nm | isAlpha (head nm) = nm
                      | otherwise         = "(" ++ nm ++ ")"

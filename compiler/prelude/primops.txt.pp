@@ -73,6 +73,7 @@ defaults
    fixity           = Nothing
    llvm_only        = False
    vector           = []
+   deprecated_msg   = {}      -- A non-empty message indicates deprecation
 
 -- Currently, documentation is produced using latex, so contents of
 -- description fields should be legal latex. Descriptions can contain
@@ -261,7 +262,7 @@ primop   IntNegOp    "negateInt#"    Monadic   Int# -> Int#
    {Unary negation.
     Since the most negative {\tt Int#} range extends one further than the
     positive range, {\tt negateInt#} of the most negative number is an
-    identity operation. This way, {\tt negateInt#} is always its own inverse.}
+    identity operation. This way, {\tt negateInt#} is always its own inverse}
 
 primop   IntAddCOp   "addIntC#"    GenPrimOp   Int# -> Int# -> (# Int#, Int# #)
          {Add signed integers reporting overflow.
@@ -1203,7 +1204,8 @@ primop  SizeofMutableByteArrayOp "sizeofMutableByteArray#" GenPrimOp
    MutableByteArray# s -> Int#
    {Return the size of the array in bytes. Note that this is deprecated as it is
    unsafe in the presence of concurrent resize operations on the same byte
-   array. See {\tt getSizeofMutableByteArray}.}
+   array.}
+   with deprecated_msg = { Use 'getSizeofMutableByteArray#' instead }
 
 primop  GetSizeofMutableByteArrayOp "getSizeofMutableByteArray#" GenPrimOp
    MutableByteArray# s -> State# s -> (# State# s, Int# #)
@@ -1822,7 +1824,7 @@ primop FetchXorByteArrayOp_Int "fetchXorIntArray#" GenPrimOp
 section "Arrays of arrays"
         {Operations on {\tt ArrayArray\#}. An {\tt ArrayArray\#} contains references to {\em unpointed}
          arrays, such as {\tt ByteArray\#s}. Hence, it is not parameterised by the element types,
-         just like a {\tt ByteArray\#}, but it needs to be scanned during GC, just like an {\tt Array#}.
+         just like a {\tt ByteArray\#}, but it needs to be scanned during GC, just like an {\tt Array\#}.
          We represent an {\tt ArrayArray\#} exactly as a {\tt Array\#}, but provide element-type-specific
          indexing, reading, and writing.}
 ------------------------------------------------------------------------
@@ -1948,11 +1950,13 @@ primop   AddrRemOp "remAddr#" GenPrimOp Addr# -> Int# -> Int#
           is divided by the {\tt Int\#} arg.}
 #if (WORD_SIZE_IN_BITS == 32 || WORD_SIZE_IN_BITS == 64)
 primop   Addr2IntOp  "addr2Int#"     GenPrimOp   Addr# -> Int#
-        {Coerce directly from address to int. Strongly deprecated.}
+        {Coerce directly from address to int.}
    with code_size = 0
+        deprecated_msg = { This operation is strongly deprecated. }
 primop   Int2AddrOp   "int2Addr#"    GenPrimOp  Int# -> Addr#
-        {Coerce directly from int to address. Strongly deprecated.}
+        {Coerce directly from int to address.}
    with code_size = 0
+        deprecated_msg = { This operation is strongly deprecated. }
 #endif
 
 primop   AddrGtOp  "gtAddr#"   Compare   Addr# -> Addr# -> Int#
@@ -2933,6 +2937,7 @@ primop  ParOp "par#" GenPrimOp
       -- gets evaluated strictly, which it should *not* be
    has_side_effects = True
    code_size = { primOpCodeSizeForeignCall }
+   deprecated_msg = { Use 'spark#' instead }
 
 primop SparkOp "spark#" GenPrimOp
    a -> State# s -> (# State# s, a #)
