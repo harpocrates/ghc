@@ -9,7 +9,7 @@ import Syntax
 
 import Data.Char
 import Data.List
-import Data.Maybe ( catMaybes )
+import Data.Maybe ( catMaybes, maybeToList )
 import System.Environment ( getArgs )
 
 vecOptions :: Entry -> [(String,String,Int)]
@@ -252,7 +252,9 @@ gen_hs_source (Info defaults entries) =
                 -- and we don't want a complaint that the constraint is redundant
                 -- Remember, this silly file is only for Haddock's consumption
 
-        ++ "module GHC.Prim where\n"
+        ++ "module GHC.Prim (\n"
+        ++ unlines (map (("        " ++) . hdr) entries')
+        ++ ") where\n"
     ++ "\n"
     ++ "{-\n"
         ++ unlines (map opt defaults)
@@ -282,29 +284,28 @@ gen_hs_source (Info defaults entries) =
            opt (OptionVector _)    = ""
            opt (OptionFixity mf) = "fixity" ++ " = " ++ show mf
 
-         --  hdr s@(Section {})                                    = sec s
-         --  hdr (PrimOpSpec { name = n })                         = wrapOp n ++ ","
-         --  hdr (PrimVecOpSpec { name = n })                      = wrapOp n ++ ","
-         --  hdr (PseudoOpSpec { name = n })                       = wrapOp n ++ ","
-         --  hdr (PrimTypeSpec { ty = TyApp (TyCon n) _ })         = wrapTy n ++ ","
-         --  hdr (PrimTypeSpec {})                                 = error $ "Illegal type spec"
-         --  hdr (PrimVecTypeSpec { ty = TyApp (VecTyCon n _) _ }) = wrapTy n ++ ","
-         --  hdr (PrimVecTypeSpec {})                              = error $ "Illegal type spec"
+           hdr s@(Section {})                                    = sec s
+           hdr (PrimOpSpec { name = n })                         = asPrefix n ++ ","
+           hdr (PrimVecOpSpec { name = n })                      = asPrefix n ++ ","
+           hdr (PseudoOpSpec { name = n })                       = asPrefix n ++ ","
+           hdr (PrimTypeSpec { ty = TyApp (TyCon "->") _ })      = "" -- this can't be explicitly exported
+           hdr (PrimTypeSpec { ty = TyApp (TyCon n) _ })         = asPrefix n ++ ","
+           hdr (PrimTypeSpec {})                                 = error $ "Illegal type spec"
+           hdr (PrimVecTypeSpec { ty = TyApp (VecTyCon n _) _ }) = asPrefix n ++ ","
+           hdr (PrimVecTypeSpec {})                              = error $ "Illegal type spec"
 
-           ent s@(Section {})         = sec s
+           ent   (Section {})         = []
            ent o@(PrimOpSpec {})      = spec o
            ent o@(PrimVecOpSpec {})   = spec o
            ent o@(PrimTypeSpec {})    = spec o
            ent o@(PrimVecTypeSpec {}) = spec o
            ent o@(PseudoOpSpec {})    = spec o
 
-           sec s = [ "-- * " ++ escape (title s)
-                   , "--"
-                   , "-- " ++ filter isAlphaNum (title s)
-                   ] ++ (map ("-- " ++) $ lines $ unlatex $ escape $ desc s)
+           sec s = "\n-- * " ++ escape (title s) ++ "\n"
+                    ++ (unlines $ map ("-- " ++ ) $ lines $ unlatex $ escape $ "|" ++ desc s) ++ "\n"
 
            spec o = [ "" ] ++ comm ++ depr ++ fxty ++ decls
-             where fxty  = prim_fixity (name o) (opts o)
+             where fxty  = prim_fixity (opts o) =<< maybeToList (getName o)
 
                    decls = case o of  -- See Note [Placeholder declarations]
                         PrimOpSpec { name = n, ty = t }    -> prim_func n t
@@ -323,8 +324,7 @@ gen_hs_source (Info defaults entries) =
                         [m] -> [ "", "__/Warning:/__ this " ++ m ++ "." ]
                         _ -> []
 
-
-                   depr = prim_deprecated (name o) (opts o)
+                   depr = prim_deprecated (opts o) . asPrefix =<< maybeToList (getName o)
 
            on_llvm_only options = case lookup_attrib "llvm_only" options of
              Just (OptionTrue _) -> [ "is only available on LLVM" ]
@@ -334,25 +334,19 @@ gen_hs_source (Info defaults entries) =
              Just (OptionTrue _) -> [ "can fail with an unchecked exception" ]
              _ -> []
 
-           prim_fixity n options = [ pprFixity fixity n | OptionFixity (Just fixity) <- options ]
+           prim_fixity options n = [ pprFixity fixity n | OptionFixity (Just fixity) <- options ]
 
-           prim_func n t = [ wrapOp n ++ " :: " ++ pprTy t,
-                             wrapOp n ++ " = " ++ wrapOpRhs n ]
+           prim_func n t = [ asPrefix n ++ " :: " ++ pprTy t,
+                             asPrefix n ++ " = " ++ funcRhs n ]
            prim_data t = [ "data " ++ pprTy t ]
 
-           prim_deprecated n options = case lookup_attrib "deprecated_msg" options of
-             Just (OptionString _ msg) -> [ "{-# DEPRECATED " ++ wrapOp n ++
+           prim_deprecated options n = case lookup_attrib "deprecated_msg" options of
+             Just (OptionString _ msg) -> [ "{-# DEPRECATED " ++ asPrefix n ++
                                             " \"" ++ msg ++ "\" #-}" ]
              _ -> []
 
-           wrapOp nm | isAlpha (head nm) = nm
-                     | otherwise         = "(" ++ nm ++ ")"
-
-           wrapTy nm | isAlpha (head nm) = nm
-                     | otherwise         = "(" ++ nm ++ ")"
-
-           wrapOpRhs "tagToEnum#" = "let x = x in x"
-           wrapOpRhs nm           = wrapOp nm
+           funcRhs "tagToEnum#" = "let x = x in x"
+           funcRhs nm           = asPrefix nm
               -- Special case for tagToEnum#: see Note [Placeholder declarations]
 
            unlatex s = case s of
@@ -371,8 +365,15 @@ gen_hs_source (Info defaults entries) =
            escape = concatMap (\c -> if c `elem` special then '\\':c:[] else c:[])
                 where special = "/'`\"@<"
 
-           pprFixity (Fixity _ i d) n
-             = pprFixityDir d ++ " " ++ show i ++ " " ++ n
+           pprFixity (Fixity _ i d) n = pprFixityDir d ++ " " ++ show i ++ " " ++ asInfix n
+
+-- | Extract a string representation of the name
+getName :: Entry -> Maybe String
+getName PrimOpSpec{ name = n } = Just n
+getName PrimVecOpSpec{ name = n } = Just n
+getName PseudoOpSpec{ name = n } = Just n
+getName PrimTypeSpec{ ty = TyApp tc _ } = Just (show tc)
+getName _ = Nothing
 
 {- Note [Placeholder declarations]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -401,7 +402,7 @@ pprTy = pty
           pty (TyF t1 t2) = pbty t1 ++ " -> " ++ pty t2
           pty (TyC t1 t2) = pbty t1 ++ " => " ++ pty t2
           pty t      = pbty t
-          pbty (TyApp tc ts) = show tc ++ concat (map (' ' :) (map paty ts))
+          pbty (TyApp tc ts) = asPrefix (show tc) ++ concat (map (' ' :) (map paty ts))
           pbty (TyUTup ts)   = "(# "
                             ++ concat (intersperse "," (map pty ts))
                             ++ " #)"
@@ -409,6 +410,16 @@ pprTy = pty
 
           paty (TyVar tv)    = tv
           paty t             = "(" ++ pty t ++ ")"
+
+-- | Turn an identifier or operator into its prefix form
+asPrefix :: String -> String
+asPrefix nm | isAlpha (head nm) = nm
+            | otherwise         = "(" ++ nm ++ ")"
+
+-- | Turn an identifer or operator into its infix form
+asInfix :: String -> String
+asInfix nm | isAlpha (head nm) = "`" ++ nm ++ "`"
+           | otherwise         = nm
 
 gen_latex_doc :: Info -> String
 gen_latex_doc (Info defaults entries)

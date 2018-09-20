@@ -184,7 +184,7 @@ ppT : lowerName { TyVar $1 }
 pTycon :: { TyCon }
 pTycon : upperName { TyCon $1 }
        | '(' ')'      { TyCon "()" }
-       | '(' '->' ')' { TyCon "(->)" }
+       | '(' '->' ')' { TyCon "->" }
        | SCALAR       { SCALAR }
        | VECTOR       { VECTOR }
        | VECTUPLE     { VECTUPLE }

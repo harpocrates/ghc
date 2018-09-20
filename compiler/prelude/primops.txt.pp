@@ -155,6 +155,19 @@ section "The word size story."
 #define WORD64 Word#
 #endif
 
+-- This type won't be exported directly (since there is no concrete
+-- syntax for this sort of export) so we'll have to manually patch
+-- export lists in both GHC and Haddock.
+primtype (->) a b
+  {The builtin function type, written in infix form as {\tt a -> b} and
+   in prefix form as {\tt (->) a b}. Values of this type are functions
+   taking inputs of type {\tt a} and producing outputs of type {\tt b}.
+
+   Note that {\tt (->)} is levity-polymorphic in its argument types, so
+   that types like {\tt Int\# -> Int\#} can still be well-kinded.
+  }
+  with fixity = infixr 0
+
 ------------------------------------------------------------------------
 section "Char#"
         {Operations on 31-bit characters.}
@@ -256,13 +269,13 @@ primop   XorIOp   "xorI#"   Dyadic    Int# -> Int# -> Int#
    with commutable = True
 
 primop   NotIOp   "notI#"   Monadic   Int# -> Int#
-   {Bitwise "not", or the complement}
+   {Bitwise "not", also known as the binary complement}
 
 primop   IntNegOp    "negateInt#"    Monadic   Int# -> Int#
    {Unary negation.
-    Since the most negative {\tt Int#} range extends one further than the
+    Since the negative {\tt Int#} range extends one further than the
     positive range, {\tt negateInt#} of the most negative number is an
-    identity operation. This way, {\tt negateInt#} is always its own inverse}
+    identity operation. This way, {\tt negateInt#} is always its own inverse.}
 
 primop   IntAddCOp   "addIntC#"    GenPrimOp   Int# -> Int# -> (# Int#, Int# #)
          {Add signed integers reporting overflow.
@@ -2983,19 +2996,19 @@ primop  TagToEnumOp "tagToEnum#" GenPrimOp
 -- The way to ensure this is to invoke it via the 'getTag' wrapper in GHC.Base:
 --    getTag :: a -> Int#
 --    getTag !x = dataToTag# x
--- 
+--
 -- But now consider
 --     \z. case x of y -> let v = dataToTag# y in ...
--- 
+--
 -- To improve floating, the FloatOut pass (deliberately) does a
 -- binder-swap on the case, to give
 --     \z. case x of y -> let v = dataToTag# x in ...
--- 
+--
 -- Now FloatOut might float that v-binding outside the \z.  But that is
 -- bad because that might mean x gets evaluated much too early!  (CorePrep
 -- adds an eval to a dataToTag# call, to ensure that the argument really is
 -- evaluated; see CorePrep Note [dataToTag magic].)
--- 
+--
 -- Solution: make DataToTag into a can_fail primop.  That will stop it floating
 -- (see Note [PrimOp can_fail and has_side_effects] in PrimOp).  It's a bit of
 -- a hack but never mind.
@@ -3119,6 +3132,7 @@ pseudoop   "seq"
      In particular, this means that {\tt b} may be evaluated before
      {\tt a}. If you need to guarantee a specific order of evaluation,
      you must use the function {\tt pseq} from the "parallel" package. }
+   with fixity = infixr 0
 
 pseudoop   "unsafeCoerce#"
    a -> b
@@ -3154,6 +3168,7 @@ pseudoop   "unsafeCoerce#"
         to, use {\tt Any}, which is not an algebraic data type.
 
         }
+   with can_fail = True
 
 -- NB. It is tempting to think that casting a value to a type that it doesn't have is safe
 -- as long as you don't "do anything" with the value in its cast form, such as seq on it.  This
