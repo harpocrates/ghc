@@ -252,9 +252,7 @@ gen_hs_source (Info defaults entries) =
                 -- and we don't want a complaint that the constraint is redundant
                 -- Remember, this silly file is only for Haddock's consumption
 
-        ++ "module GHC.Prim (\n"
-        ++ unlines (map (("        " ++) . hdr) entries')
-        ++ ") where\n"
+        ++ "module GHC.Prim where\n"
     ++ "\n"
     ++ "{-\n"
         ++ unlines (map opt defaults)
@@ -284,24 +282,26 @@ gen_hs_source (Info defaults entries) =
            opt (OptionVector _)    = ""
            opt (OptionFixity mf) = "fixity" ++ " = " ++ show mf
 
-           hdr s@(Section {})                                    = sec s
-           hdr (PrimOpSpec { name = n })                         = wrapOp n ++ ","
-           hdr (PrimVecOpSpec { name = n })                      = wrapOp n ++ ","
-           hdr (PseudoOpSpec { name = n })                       = wrapOp n ++ ","
-           hdr (PrimTypeSpec { ty = TyApp (TyCon n) _ })         = wrapTy n ++ ","
-           hdr (PrimTypeSpec {})                                 = error $ "Illegal type spec"
-           hdr (PrimVecTypeSpec { ty = TyApp (VecTyCon n _) _ }) = wrapTy n ++ ","
-           hdr (PrimVecTypeSpec {})                              = error $ "Illegal type spec"
+         --  hdr s@(Section {})                                    = sec s
+         --  hdr (PrimOpSpec { name = n })                         = wrapOp n ++ ","
+         --  hdr (PrimVecOpSpec { name = n })                      = wrapOp n ++ ","
+         --  hdr (PseudoOpSpec { name = n })                       = wrapOp n ++ ","
+         --  hdr (PrimTypeSpec { ty = TyApp (TyCon n) _ })         = wrapTy n ++ ","
+         --  hdr (PrimTypeSpec {})                                 = error $ "Illegal type spec"
+         --  hdr (PrimVecTypeSpec { ty = TyApp (VecTyCon n _) _ }) = wrapTy n ++ ","
+         --  hdr (PrimVecTypeSpec {})                              = error $ "Illegal type spec"
 
-           ent   (Section {})         = []
+           ent s@(Section {})         = sec s
            ent o@(PrimOpSpec {})      = spec o
            ent o@(PrimVecOpSpec {})   = spec o
            ent o@(PrimTypeSpec {})    = spec o
            ent o@(PrimVecTypeSpec {}) = spec o
            ent o@(PseudoOpSpec {})    = spec o
 
-           sec s = "\n-- * " ++ escape (title s) ++ "\n"
-                        ++ (unlines $ map ("-- " ++ ) $ lines $ unlatex $ escape $ "|" ++ desc s) ++ "\n"
+           sec s = [ "-- * " ++ escape (title s)
+                   , "--"
+                   , "-- " ++ filter isAlphaNum (title s)
+                   ] ++ (map ("-- " ++) $ lines $ unlatex $ escape $ desc s)
 
            spec o = [ "" ] ++ comm ++ depr ++ fxty ++ decls
              where fxty  = prim_fixity (name o) (opts o)
@@ -319,8 +319,8 @@ gen_hs_source (Info defaults entries) =
                         d -> map ("-- " ++ ) $ (lines . unlatex . escape $ "|" ++ d) ++ extra
 
                    extra = case on_llvm_only (opts o) ++ can_fail (opts o) of
-                        [m1,m2] -> [ "", "This " ++ m1 ++ " and " ++ m2 ++ "." ]
-                        [m] -> [ "", "This " ++ m ++ "." ]
+                        [m1,m2] -> [ "", "__/Warning:/__ this " ++ m1 ++ " and " ++ m2 ++ "." ]
+                        [m] -> [ "", "__/Warning:/__ this " ++ m ++ "." ]
                         _ -> []
 
 
