@@ -919,7 +919,7 @@ czeroBigNat = runS $ do
 --  - 'minusBigNatWord'
 --
 -- Other operations such as 'quotBigNat' may return 'nullBigNat' as
--- well as a dummy/place-holder value instead of 'undefined' since we
+-- well as a dummy/place-holder value instead of @undefined@ since we
 -- can't throw exceptions. But that behaviour should not be relied
 -- upon.
 --
@@ -2033,7 +2033,8 @@ isValidBigNat# (BN# ba#)
 
     !(# szq#, szr# #) = quotRemInt# sz# GMP_LIMB_BYTES#
 
--- | Version of 'nextPrimeInteger' operating on 'BigNat's
+-- | Version of 'GHC.Integer.GMP.Internals.nextPrimeInteger' operating on
+-- 'BigNat's
 --
 -- @since 1.0.0.0
 nextPrimeBigNat :: BigNat -> BigNat

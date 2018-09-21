@@ -87,8 +87,8 @@ import Prelude hiding ((.),id)
 --
 -- Any instance should be subject to the following laws:
 --
--- > contramap id = id
--- > contramap f . contramap g = contramap (g . f)
+-- [Identity]    contramap id = id
+-- [Composition] contramap (g . f) = contramap f . contramap g
 --
 -- Note, that the second law follows from the free theorem of the type of
 -- 'contramap' and the first law, so you need only check that the former

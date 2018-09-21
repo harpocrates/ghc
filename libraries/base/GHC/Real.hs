@@ -138,7 +138,7 @@ class  (Num a, Ord a) => Real a  where
 --
 -- The Haskell Report defines no laws for 'Integral'. However, 'Integral'
 -- instances are customarily expected to define a Euclidean domain and have the
--- following properties for the 'div'/'mod' and 'quot'/'rem' pairs, given
+-- following properties for the `div`/`mod` and `quot`/`rem` pairs, given
 -- suitable Euclidean functions @f@ and @g@:
 --
 -- * @x@ = @y * quot x y + rem x y@ with @rem x y@ = @fromInteger 0@ or
