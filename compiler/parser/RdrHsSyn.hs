@@ -91,7 +91,8 @@ import Lexeme           ( isLexCon )
 import Type             ( TyThing(..) )
 import TysWiredIn       ( cTupleTyConName, tupleTyCon, tupleDataCon,
                           nilDataConName, nilDataConKey,
-                          listTyConName, listTyConKey, eqTyCon_RDR )
+                          listTyConName, listTyConKey, eqTyCon_RDR,
+                          cTupleTyConNames, tupleTyConName )
 import ForeignCall
 import PrelNames        ( forall_tv_RDR, allNameStrings )
 import SrcLoc
@@ -809,11 +810,20 @@ checkTyVars pp_what equals_or_where tc tparms
     chk t@(L loc _)
         = Left (loc,
                 vcat [ text "Unexpected type" <+> quotes (ppr t)
-                     , text "In the" <+> pp_what <+> ptext (sLit "declaration for") <+> quotes (ppr tc)
+                     , text "In the" <+> pp_what <+> ptext (sLit "declaration for") <+> quotes tc'
                      , vcat[ (text "A" <+> pp_what <+> ptext (sLit "declaration should have form"))
-                     , nest 2 (pp_what <+> ppr tc
+                     , nest 2 (pp_what <+> tc'
                                        <+> hsep (map text (takeList tparms allNameStrings))
                                        <+> equals_or_where) ] ])
+
+    -- Avoid printing a constraint tuple in the error message. Print
+    -- a plain old tuple instead (since that's what the user probably
+    -- wrote). See #14907
+    tc' = ppr $ case tc of
+      L l (Exact n) | Just arity <- n `elemIndex` cTupleTyConNames
+                    -> let arity' = if arity > 0 then arity + 1 else arity
+                       in L l (Exact (tupleTyConName BoxedTuple arity'))
+      _ -> tc
 
 whereDots, equalsDots :: SDoc
 -- Second argument to checkTyVars

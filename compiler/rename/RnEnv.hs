@@ -1643,6 +1643,11 @@ badOrigBinding name
   | Just _ <- isBuiltInOcc_maybe occ
   = text "Illegal binding of built-in syntax:" <+> ppr occ
     -- Use an OccName here because we don't want to print Prelude.(,)
+  | Exact n <- name
+  , isCTupleTyConName n
+  = text "Illegal binding of built-in constraint tuple syntax"
+    -- Avoid printing the 'occ' or the 'rdr', since we don't want users
+    -- seeing the (%,%) constraint tuple syntax. See #14907.
   | otherwise
   = text "Cannot redefine a Name retrieved by a Template Haskell quote:"
     <+> ppr name
