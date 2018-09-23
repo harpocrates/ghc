@@ -1473,7 +1473,7 @@ hsTypeNeedsParens p = go
     go (HsFunTy{})           = p >= funPrec
     go (HsTupleTy{})         = False
     go (HsSumTy{})           = False
-    go (HsKindSig{})         = False
+    go (HsKindSig{})         = p >= sigPrec
     go (HsListTy{})          = False
     go (HsIParamTy{})        = p > topPrec
     go (HsSpliceTy{})        = False

@@ -129,6 +129,15 @@ state 57 contains 2 shift/reduce conflicts.
 
 -------------------------------------------------------------------------------
 
+state 60 contains 1 shift/reduce conflict.
+
+    *** ctype -> type . '::' kind
+        ctype -> type .
+
+    Conflicts: '::'
+
+-------------------------------------------------------------------------------
+
 state 61 contains 1 shift/reduce conflict.
 
         context -> btype .
@@ -311,6 +320,16 @@ Example ambiguity: 'let ?x ...'
 The parser can't tell whether the ?x is the lhs of a normal binding or
 an implicit binding.  Fortunately, resolving as shift gives it the only
 sensible meaning, namely the lhs of an implicit binding.
+
+-------------------------------------------------------------------------------
+
+state 715 contains 1 shift/reduce conflict.
+
+    *** ctype -> type . '::' kind
+        ctype -> type .
+        ctypedoc -> type . '::' kind
+
+    Conflicts: '::'
 
 -------------------------------------------------------------------------------
 
