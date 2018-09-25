@@ -15,4 +15,4 @@ Overflow.hs:27:6: warning: [-Woverflowed-literals (in -Wdefault)]
     Literal -1 is out of the Word range 0..18446744073709551615
 
 Overflow.hs:31:1: warning: [-Woverflowed-literals (in -Wdefault)]
-    Literal -1 is out of the Word# range 0..18446744073709551615
+    Literal -1 is out of the Word range 0..18446744073709551615
