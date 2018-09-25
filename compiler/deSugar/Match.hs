@@ -493,7 +493,8 @@ tidy1 _ _ non_interesting_pat
   = return (idDsWrapper, non_interesting_pat)
 
 --------------------
-tidy_bang_pat :: Id -> Origin -> SrcSpan -> Pat GhcTc -> DsM (DsWrapper, Pat GhcTc)
+tidy_bang_pat :: Id -> Origin -> SrcSpan -> Pat GhcTc
+              -> DsM (DsWrapper, Pat GhcTc)
 
 -- Discard par/sig under a bang
 tidy_bang_pat v o _ (ParPat _ (L l p)) = tidy_bang_pat v o l p
@@ -691,7 +692,7 @@ Call @match@ with all of this information!
 
 matchWrapper
   :: HsMatchContext Name               -- ^ For shadowing warning messages
-  -> Maybe (LHsExpr GhcTc)             -- ^ The scrutinee, if we check a case expr
+  -> Maybe (LHsExpr GhcTc)             -- ^ Scrutinee, if we check a case expr
   -> MatchGroup GhcTc (LHsExpr GhcTc)  -- ^ Matches being desugared
   -> DsM ([Id], CoreExpr)              -- ^ Results (usually passed to 'match')
 

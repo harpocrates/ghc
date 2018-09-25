@@ -72,8 +72,8 @@ module TysPrim(
         int32PrimTyCon,         int32PrimTy,
         word32PrimTyCon,        word32PrimTy,
 
-        int64PrimTyCon,         int64PrimTy,
-        word64PrimTyCon,        word64PrimTy,
+        int64PrimTyCon,         int64PrimTy, int64PrimTyConName,
+        word64PrimTyCon,        word64PrimTy, word64PrimTyConName,
 
         eqPrimTyCon,            -- ty1 ~# ty2
         eqReprPrimTyCon,        -- ty1 ~R# ty2  (at role Representational)

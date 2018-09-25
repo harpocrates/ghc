@@ -162,7 +162,7 @@ warnAboutOverflowedLiterals
   -> DsM ()
 warnAboutOverflowedLiterals dflags lit
  | wopt Opt_WarnOverflowedLiterals dflags
- , Just (i, tc) <- either getIntegralLit getHsLit lit
+ , Just (i, tc) <- either getIntegralLit getSimpleIntegralLit lit
  =  if      tc == intTyConName     then check i tc (Proxy :: Proxy Int)
 
     -- These only show up via the 'HsOverLit' route
@@ -187,16 +187,6 @@ warnAboutOverflowedLiterals dflags lit
 
   | otherwise = return ()
   where
-
-    int64PrimTyConName = tyConName int64PrimTyCon
-    word64PrimTyConName = tyConName word64PrimTyCon
-
-    getHsLit (HsInt _ IL{ il_value = i }) = Just (i, intTyConName)
-    getHsLit (HsIntPrim _ i) = Just (i, intPrimTyConName)
-    getHsLit (HsWordPrim _ i) = Just (i, wordPrimTyConName)
-    getHsLit (HsInt64Prim _ i) = Just (i, int64PrimTyConName)
-    getHsLit (HsWord64Prim _ i) = Just (i, word64PrimTyConName)
-    getHsLit _ = Nothing
 
     checkPositive :: Integer -> Name -> DsM ()
     checkPositive i tc
@@ -238,8 +228,8 @@ but perhaps that does not matter too much.
 
 warnAboutEmptyEnumerations :: DynFlags -> LHsExpr GhcTc -> Maybe (LHsExpr GhcTc)
                            -> LHsExpr GhcTc -> DsM ()
--- Warns about [2,3 .. 1] which returns the empty list
--- Only works for integral types, not floating point
+-- ^ Warns about @[2,3 .. 1]@ which returns the empty list.
+-- Only works for integral types, not floating point.
 warnAboutEmptyEnumerations dflags fromExpr mThnExpr toExpr
   | wopt Opt_WarnEmptyEnumerations dflags
   , Just (from,tc) <- getLHsIntegralLit fromExpr
@@ -271,19 +261,33 @@ warnAboutEmptyEnumerations dflags fromExpr mThnExpr toExpr
   | otherwise = return ()
 
 getLHsIntegralLit :: LHsExpr GhcTc -> Maybe (Integer, Name)
--- See if the expression is an Integral literal
+-- ^ See if the expression is an 'Integral' literal.
 -- Remember to look through automatically-added tick-boxes! (Trac #8384)
 getLHsIntegralLit (L _ (HsPar _ e))            = getLHsIntegralLit e
 getLHsIntegralLit (L _ (HsTick _ _ e))         = getLHsIntegralLit e
 getLHsIntegralLit (L _ (HsBinTick _ _ _ e))    = getLHsIntegralLit e
 getLHsIntegralLit (L _ (HsOverLit _ over_lit)) = getIntegralLit over_lit
+getLHsIntegralLit (L _ (HsLit _ lit))          = getSimpleIntegralLit lit
 getLHsIntegralLit _ = Nothing
 
+-- | If 'Integral', extract the value and type name of the literal.
 getIntegralLit :: HsOverLit GhcTc -> Maybe (Integer, Name)
 getIntegralLit (OverLit { ol_val = HsIntegral i, ol_ext = OverLitTc _ ty })
   | Just tc <- tyConAppTyCon_maybe ty
   = Just (il_value i, tyConName tc)
 getIntegralLit _ = Nothing
+
+-- | If 'Integral', extract the value and type name of the simple literal.
+getSimpleIntegralLit :: HsLit GhcTc -> Maybe (Integer, Name)
+getSimpleIntegralLit (HsInt _ IL{ il_value = i }) = Just (i, intTyConName)
+getSimpleIntegralLit (HsIntPrim _ i) = Just (i, intPrimTyConName)
+getSimpleIntegralLit (HsWordPrim _ i) = Just (i, wordPrimTyConName)
+getSimpleIntegralLit (HsInt64Prim _ i) = Just (i, int64PrimTyConName)
+getSimpleIntegralLit (HsWord64Prim _ i) = Just (i, word64PrimTyConName)
+getSimpleIntegralLit (HsInteger _ i ty)
+  | Just tc <- tyConAppTyCon_maybe ty
+  = Just (i, tyConName tc)
+getSimpleIntegralLit _ = Nothing
 
 {-
 ************************************************************************
