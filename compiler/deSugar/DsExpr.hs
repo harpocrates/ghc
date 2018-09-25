@@ -212,6 +212,7 @@ dsUnliftedBind (PatBind {pat_lhs = pat, pat_rhs = grhss
        ; checkGuardMatches PatBindGuards grhss
        ; let upat = unLoc pat
              eqn = EqnInfo { eqn_pats = [upat],
+                             eqn_orig = FromSource,
                              eqn_rhs = cantFailMatchResult body }
        ; var    <- selectMatchVar upat
        ; result <- matchEquations PatBindRhs [var] [eqn] (exprType body)

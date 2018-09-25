@@ -390,10 +390,10 @@ matchLiterals (var:vars) ty sub_groups
   where
     match_group :: [EquationInfo] -> DsM (Literal, MatchResult)
     match_group eqns
-        = do dflags <- getDynFlags
-             let LitPat _ hs_lit = firstPat (head eqns)
-             match_result <- match vars ty (shiftEqns eqns)
-             return (hsLitKey dflags hs_lit, match_result)
+        = do { dflags <- getDynFlags
+             ; let LitPat _ hs_lit = firstPat (head eqns)
+             ; match_result <- match vars ty (shiftEqns eqns)
+             ; return (hsLitKey dflags hs_lit, match_result) }
 
     wrap_str_guard :: Id -> (Literal,MatchResult) -> DsM MatchResult
         -- Equality check for string literals
