@@ -263,8 +263,16 @@ ds_expr _ (HsUnboundVar {})      = panic "dsExpr: HsUnboundVar" -- Typechecker e
 ds_expr w (HsConLikeOut _ con)   = dsConLike w con
 ds_expr _ (HsIPVar {})           = panic "dsExpr: HsIPVar"
 ds_expr _ (HsOverLabel{})        = panic "dsExpr: HsOverLabel"
-ds_expr _ (HsLit _ lit)          = dsLit (convertLit lit)
-ds_expr _ (HsOverLit _ lit)      = dsOverLit lit
+
+ds_expr _ (HsLit _ lit)
+  = do { dflags <- getDynFlags
+       ; warnAboutOverflowedLiterals dflags (Right lit)
+       ; dsLit (convertLit lit) }
+
+ds_expr _ (HsOverLit _ lit)
+  = do { dflags <- getDynFlags
+       ; warnAboutOverflowedLiterals dflags (Left lit)
+       ; dsOverLit dflags lit }
 
 ds_expr _ (HsWrap _ co_fn e)
   = do { e' <- ds_expr True e    -- This is the one place where we recurse to
@@ -281,9 +289,10 @@ ds_expr _ (NegApp _ (L loc (HsOverLit _ lit@(OverLit { ol_val = HsIntegral i})))
                   neg_expr)
   = do { expr' <- putSrcSpanDs loc $ do
           { dflags <- getDynFlags
-          ; warnAboutOverflowedLiterals dflags
-                                        (lit { ol_val = HsIntegral (negateIntegralLit i) })
-          ; dsOverLit' dflags lit }
+          ; warnAboutOverflowedLiterals
+              dflags
+              (Left (lit { ol_val = HsIntegral (negateIntegralLit i) }))
+          ; dsOverLit dflags lit }
        ; dsSyntaxExpr neg_expr [expr'] }
 
 ds_expr _ (NegApp _ expr neg_expr)

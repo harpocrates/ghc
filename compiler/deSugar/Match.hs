@@ -464,14 +464,24 @@ tidy1 _ (SumPat tys pat alt arity)
 
 -- LitPats: we *might* be able to replace these w/ a simpler form
 tidy1 _ (LitPat _ lit)
-  = return (idDsWrapper, tidyLitPat lit)
+  = do { dflags <- getDynFlags
+       ; warnAboutOverflowedLiterals dflags (Right lit)
+       ; return (idDsWrapper, tidyLitPat lit) }
 
 -- NPats: we *might* be able to replace these w/ a simpler form
 tidy1 _ (NPat ty (L _ lit) mb_neg eq)
-  = return (idDsWrapper, tidyNPat lit mb_neg eq ty)
+  = do { dflags <- getDynFlags
+       ; warnAboutOverflowedLiterals dflags (Left lit)
+       ; return (idDsWrapper, tidyNPat lit mb_neg eq ty) }
+
+-- NPlusKPat: we may want to warn about the literals
+tidy1 _ n@(NPlusKPat _ _ (L _ lit1) lit2 _ _)
+  = do { dflags <- getDynFlags
+       ; warnAboutOverflowedLiterals dflags (Left lit1)
+       ; warnAboutOverflowedLiterals dflags (Left lit2)
+       ; return (idDsWrapper, n) }
 
 -- Everything else goes through unchanged...
-
 tidy1 _ non_interesting_pat
   = return (idDsWrapper, non_interesting_pat)
 
