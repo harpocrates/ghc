@@ -256,6 +256,9 @@ warnAboutEmptyEnumerations dflags fromExpr mThnExpr toExpr
     else if tc == word32TyConName then check (Proxy :: Proxy Word32)
     else if tc == word64TyConName then check (Proxy :: Proxy Word64)
     else if tc == integerTyConName then check (Proxy :: Proxy Integer)
+    else if tc == naturalTyConName then check (Proxy :: Proxy Integer)
+      -- We use 'Integer' because otherwise a negative 'Natural' literal
+      -- could cause a compile time crash (instead of a runtime one)
     else return ()
 
   | otherwise = return ()

@@ -6,6 +6,7 @@ test('T9178', [], multimod_compile, ['T9178', '-Wall'])
 test('T9230', normal, compile, [''])
 
 test('T10908', normal, compile, [''])
+test('T10930', normal, compile, [''])
 test('T11077', normal, compile, ['-fwarn-missing-exported-signatures'])
 test('T11128', normal, compile, [''])
 test('T11128b', normal, compile, [''])
