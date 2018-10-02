@@ -197,14 +197,58 @@ instance Applicative Q where
 
 type role TExp nominal   -- See Note [Role of TExp]
 newtype TExp a = TExp { unType :: Exp }
+-- ^ Represents an expression which has type @a@. On top of 'Exp', typed
+-- expressions allow for type-safe splicing of Template Haskell expressions
+-- using
+--
+--   - typed quotes, written as @[|| ... ||]@ where @...@ is an expression; if
+--     that expression has type @a@, then the quotation has type
+--     @'Q' ('TExp' a)@
+--
+--   - typed splices inside of typed quotes, written as @$$(...)@ where @...@
+--     is an arbitrary expression of type @'Q' ('TExp' a)@
+--
+-- This gives us an additional layer of safety, since traditional expression
+-- quotes and splices let us construct ill-typed expression trees:
+--
+-- >>> fmap ppr $ runQ [| True == $( [| "foo" |] ) |]
+-- GHC.Types.True GHC.Classes.== "foo"
+-- >>> GHC.Types.True GHC.Classes.== "foo"
+-- <interactive> error:
+--     • Couldn't match expected type ‘Bool’ with actual type ‘[Char]’
+--     • In the second argument of ‘(==)’, namely ‘"foo"’
+--       In the expression: True == "foo"
+--       In an equation for ‘it’: it = True == "foo"
+--
+-- With typed expression quotes, the type error occurs when we /constructing/
+-- the Template Haskell expression:
+--
+-- >>> fmap ppr $ runQ [|| True == $$( [|| "foo" ||] ) ||]
+-- <interactive> error:
+--     • Couldn't match type ‘[Char]’ with ‘Bool’
+--       Expected type: Q (TExp Bool)
+--         Actual type: Q (TExp [Char])
+--     • In the Template Haskell quotation [|| "foo" ||]
+--       In the expression: [|| "foo" ||]
+--       In the Template Haskell splice $$([|| "foo" ||])
 
+-- | Discard the type annotation and produce a plain Template Haskell
+-- expression
 unTypeQ :: Q (TExp a) -> Q Exp
 unTypeQ m = do { TExp e <- m
                ; return e }
 
+-- | Annotate that the Template Haskell expression with a type
 unsafeTExpCoerce :: Q Exp -> Q (TExp a)
 unsafeTExpCoerce m = do { e <- m
                         ; return (TExp e) }
+
+-- | Turn a value into a Template Haskell typed expression, suitable for use
+-- in a typed splice.
+--
+-- @since 2.15.0.0
+liftTyped :: Lift a => a -> Q (TExp a)
+liftTyped = unsafeTExpCoerce . lift
 
 {- Note [Role of TExp]
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -410,7 +454,7 @@ reifyAnnotations an = Q (qReifyAnnotations an)
 
 -- | @reifyModule mod@ looks up information about module @mod@.  To
 -- look up the current module, call this function with the return
--- value of @thisModule@.
+-- value of 'thisModule'.
 reifyModule :: Module -> Q ModuleInfo
 reifyModule m = Q (qReifyModule m)
 
@@ -1392,9 +1436,9 @@ data Info
   A \"value\" variable (as opposed to a type variable, see 'TyVarI').
 
   The @Maybe Dec@ field contains @Just@ the declaration which
-  defined the variable -- including the RHS of the declaration --
+  defined the variable - including the RHS of the declaration -
   or else @Nothing@, in the case where the RHS is unavailable to
-  the compiler. At present, this value is _always_ @Nothing@:
+  the compiler. At present, this value is /always/ @Nothing@:
   returning the RHS has not yet been implemented because of
   lack of interest.
   -}
