@@ -377,6 +377,19 @@ reifyFixity nm = Q (qReifyFixity nm)
 if @nm@ is the name of a type class, then all instances of this class at the types @tys@
 are returned. Alternatively, if @nm@ is the name of a data family or type family,
 all instances of this family at the types @tys@ are returned.
+
+Note that this is a \"shallow\" test; the declarations returned merely have
+instance heads which unify with @nm tys@, they need not actually be satisfiable.
+
+  - @reifyInstances ''Eq [ TupleT 2 \`AppT\` ConT ''A \`AppT\` ConT ''B ]@ contains
+    the @instance (Eq a, Eq b) => Eq (a, b)@ regardless of whether @A@ and
+    @B@ themselves implement 'Eq'
+
+  - @reifyInstances ''Show [ VarT (mkName "a") ]@ produces every available
+    instance of 'Eq'
+
+Additionally, @reifyInstances ''Typeable tys@ currently always produces an empty
+list.
 -}
 reifyInstances :: Name -> [Type] -> Q [InstanceDec]
 reifyInstances cls tys = Q (qReifyInstances cls tys)
@@ -1344,7 +1357,10 @@ data Info
        Type
        ParentName
 
-  -- | A \"plain\" type constructor. \"Fancier\" type constructors are returned using 'PrimTyConI' or 'FamilyI' as appropriate
+  -- | A \"plain\" type constructor. \"Fancier\" type constructors are returned
+  -- using 'PrimTyConI' or 'FamilyI' as appropriate. At present, this reified
+  -- declaration will never have derived instances attached to it (if you wish
+  -- to check for an instance, see 'reifyInstances').
   | TyConI
         Dec
 
@@ -1354,7 +1370,8 @@ data Info
         Dec
         [InstanceDec]
 
-  -- | A \"primitive\" type constructor, which can't be expressed with a 'Dec'. Examples: @(->)@, @Int#@.
+  -- | A \"primitive\" type constructor, which can't be expressed with a 'Dec'.
+  -- Examples: @(->)@, @Int#@.
   | PrimTyConI
        Name
        Arity
@@ -1366,7 +1383,7 @@ data Info
        Type
        ParentName
 
-  -- | A pattern synonym.
+  -- | A pattern synonym
   | PatSynI
        Name
        PatSynType
