@@ -11,6 +11,7 @@ test('T11077', normal, compile, ['-fwarn-missing-exported-signatures'])
 test('T11128', normal, compile, [''])
 test('T11128b', normal, compile, [''])
 test('T13256', normal, compile, [''])
+test('T15460', normal, compile, [''])
 test('PluralS', normal, compile, [''])
 
 # T12574 Test that suggest current flag over deprecated
