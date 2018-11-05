@@ -66,11 +66,11 @@ module TysPrim(
         weakPrimTyCon,                  mkWeakPrimTy,
         threadIdPrimTyCon,              threadIdPrimTy,
 
-        int8PrimTyCon,          int8PrimTy,
-        word8PrimTyCon,         word8PrimTy,
+        int8PrimTyCon,          int8PrimTy, int8PrimTyConName,
+        word8PrimTyCon,         word8PrimTy, word8PrimTyConName,
 
-        int32PrimTyCon,         int32PrimTy,
-        word32PrimTyCon,        word32PrimTy,
+        int32PrimTyCon,         int32PrimTy, int32PrimTyConName,
+        word32PrimTyCon,        word32PrimTy, word32PrimTyConName,
 
         int64PrimTyCon,         int64PrimTy, int64PrimTyConName,
         word64PrimTyCon,        word64PrimTy, word64PrimTyConName,

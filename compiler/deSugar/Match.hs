@@ -466,26 +466,23 @@ tidy1 _ _ (SumPat tys pat alt arity)
 
 -- LitPats: we *might* be able to replace these w/ a simpler form
 tidy1 _ o (LitPat _ lit)
-  = do { dflags <- getDynFlags
-       ; unless (isGenerated o) $
-           warnAboutOverflowedLiterals dflags (Right lit)
+  = do { unless (isGenerated o) $
+           warnAboutOverflowedLit lit
        ; return (idDsWrapper, tidyLitPat lit) }
 
 -- NPats: we *might* be able to replace these w/ a simpler form
 tidy1 _ o (NPat ty (L _ lit@OverLit { ol_val = v }) mb_neg eq)
-  = do { dflags <- getDynFlags
-       ; unless (isGenerated o) $
+  = do { unless (isGenerated o) $
            let lit' | Just _ <- mb_neg = lit{ ol_val = negateOverLitVal v }
                     | otherwise = lit
-           in warnAboutOverflowedLiterals dflags (Left lit')
+           in warnAboutOverflowedOverLit lit'
        ; return (idDsWrapper, tidyNPat lit mb_neg eq ty) }
 
 -- NPlusKPat: we may want to warn about the literals
 tidy1 _ o n@(NPlusKPat _ _ (L _ lit1) lit2 _ _)
-  = do { dflags <- getDynFlags
-       ; unless (isGenerated o) $ do
-           warnAboutOverflowedLiterals dflags (Left lit1)
-           warnAboutOverflowedLiterals dflags (Left lit2)
+  = do { unless (isGenerated o) $ do
+           warnAboutOverflowedOverLit lit1
+           warnAboutOverflowedOverLit lit2
        ; return (idDsWrapper, n) }
 
 -- Everything else goes through unchanged...
