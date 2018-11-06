@@ -833,7 +833,7 @@ reservedWordsFM = listToUFM $
          ( "family",         ITfamily,        0 ),
          ( "role",           ITrole,          0 ),
          ( "pattern",        ITpattern,       xbit PatternSynonymsBit),
-         ( "static",         ITstatic,        0 ),
+         ( "static",         ITstatic,        xbit StaticPointersBit ),
          ( "stock",          ITstock,         0 ),
          ( "anyclass",       ITanyclass,      0 ),
          ( "via",            ITvia,           0 ),
@@ -1328,11 +1328,6 @@ varid span buf len =
         _ -> return ITcase
       maybe_layout keyword
       return $ L span keyword
-    Just (ITstatic, _) -> do
-      staticPointers <- extension staticPointersEnabled
-      if staticPointers
-        then return $ L span ITstatic
-        else return $ L span $ ITvarid fs
     Just (keyword, 0) -> do
       maybe_layout keyword
       return $ L span keyword
@@ -2405,8 +2400,6 @@ patternSynonymsEnabled :: ExtsBitmap -> Bool
 patternSynonymsEnabled = xtest PatternSynonymsBit
 typeApplicationEnabled :: ExtsBitmap -> Bool
 typeApplicationEnabled = xtest TypeApplicationsBit
-staticPointersEnabled :: ExtsBitmap -> Bool
-staticPointersEnabled = xtest StaticPointersBit
 numericUnderscoresEnabled :: ExtsBitmap -> Bool
 numericUnderscoresEnabled = xtest NumericUnderscoresBit
 starIsTypeEnabled :: ExtsBitmap -> Bool
