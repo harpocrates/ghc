@@ -61,15 +61,7 @@ module Lexer (
    popContext, pushModuleContext, setLastToken, setSrcLoc,
    activeContext, nextIsEOF,
    getLexState, popLexState, pushLexState,
-   extension, bangPatEnabled, datatypeContextsEnabled,
-   traditionalRecordSyntaxEnabled,
-   explicitForallEnabled,
-   inRulePrag,
-   explicitNamespacesEnabled,
-   patternSynonymsEnabled,
-   starIsTypeEnabled, monadComprehensionsEnabled, doAndIfThenElseEnabled,
-   nPlusKPatternsEnabled, blockArgumentsEnabled, gadtSyntaxEnabled,
-   multiWayIfEnabled, thQuotesEnabled,
+   ExtBits(..), getBit,
    addWarning,
    lexTokenStream,
    addAnnotation,AddAnn,addAnnsAt,mkParensApiAnn,
@@ -242,7 +234,7 @@ $tab          { warnTab }
 
 -- Next, match Haddock comments if no -haddock flag
 
-"-- " $docsym .* / { ifExtension (not . haddockEnabled) } { lineCommentToken }
+"-- " $docsym .* / { alexNotPred (ifBit HaddockBit) } { lineCommentToken }
 
 -- Now, when we've matched comments that begin with 2 dashes and continue
 -- with a different character, we need to match comments that begin with three
@@ -368,44 +360,41 @@ $tab          { warnTab }
 -- Haddock comments
 
 <0,option_prags> {
-  "-- " $docsym      / { ifExtension haddockEnabled } { multiline_doc_comment }
-  "{-" \ ? $docsym   / { ifExtension haddockEnabled } { nested_doc_comment }
+  "-- " $docsym      / { ifBit HaddockBit } { multiline_doc_comment }
+  "{-" \ ? $docsym   / { ifBit HaddockBit } { nested_doc_comment }
 }
 
 -- "special" symbols
 
 <0> {
-  "[|"        / { ifExtension thQuotesEnabled } { token (ITopenExpQuote NoE
-                                                                NormalSyntax) }
-  "[||"       / { ifExtension thQuotesEnabled } { token (ITopenTExpQuote NoE) }
-  "[e|"       / { ifExtension thQuotesEnabled } { token (ITopenExpQuote HasE
-                                                                NormalSyntax) }
-  "[e||"      / { ifExtension thQuotesEnabled } { token (ITopenTExpQuote HasE) }
-  "[p|"       / { ifExtension thQuotesEnabled } { token ITopenPatQuote }
-  "[d|"       / { ifExtension thQuotesEnabled } { layout_token ITopenDecQuote }
-  "[t|"       / { ifExtension thQuotesEnabled } { token ITopenTypQuote }
-  "|]"        / { ifExtension thQuotesEnabled } { token (ITcloseQuote
-                                                                NormalSyntax) }
-  "||]"       / { ifExtension thQuotesEnabled } { token ITcloseTExpQuote }
-  \$ @varid   / { ifExtension thEnabled } { skip_one_varid ITidEscape }
-  "$$" @varid / { ifExtension thEnabled } { skip_two_varid ITidTyEscape }
-  "$("        / { ifExtension thEnabled } { token ITparenEscape }
-  "$$("       / { ifExtension thEnabled } { token ITparenTyEscape }
+  "[|"        / { ifBit ThQuotesBit } { token (ITopenExpQuote NoE NormalSyntax) }
+  "[||"       / { ifBit ThQuotesBit } { token (ITopenTExpQuote NoE) }
+  "[e|"       / { ifBit ThQuotesBit } { token (ITopenExpQuote HasE NormalSyntax) }
+  "[e||"      / { ifBit ThQuotesBit } { token (ITopenTExpQuote HasE) }
+  "[p|"       / { ifBit ThQuotesBit } { token ITopenPatQuote }
+  "[d|"       / { ifBit ThQuotesBit } { layout_token ITopenDecQuote }
+  "[t|"       / { ifBit ThQuotesBit } { token ITopenTypQuote }
+  "|]"        / { ifBit ThQuotesBit } { token (ITcloseQuote NormalSyntax) }
+  "||]"       / { ifBit ThQuotesBit } { token ITcloseTExpQuote }
+  \$ @varid   / { ifBit ThBit }       { skip_one_varid ITidEscape }
+  "$$" @varid / { ifBit ThBit }       { skip_two_varid ITidTyEscape }
+  "$("        / { ifBit ThBit }       { token ITparenEscape }
+  "$$("       / { ifBit ThBit }       { token ITparenTyEscape }
 
-  "[" @varid "|"  / { ifExtension qqEnabled }
-                     { lex_quasiquote_tok }
+  "[" @varid "|"  / { ifBit QqBit }   { lex_quasiquote_tok }
 
   -- qualified quasi-quote (#5555)
-  "[" @qvarid "|"  / { ifExtension qqEnabled }
-                     { lex_qquasiquote_tok }
+  "[" @qvarid "|"  / { ifBit QqBit }  { lex_qquasiquote_tok }
 
   $unigraphic -- ⟦
     / { ifCurrentChar '⟦' `alexAndPred`
-        ifExtension (\i -> unicodeSyntaxEnabled i && thQuotesEnabled i) }
+        ifBit UnicodeSyntaxBit `alexAndPred`
+        ifBit ThQuotesBit }
     { token (ITopenExpQuote NoE UnicodeSyntax) }
   $unigraphic -- ⟧
     / { ifCurrentChar '⟧' `alexAndPred`
-        ifExtension (\i -> unicodeSyntaxEnabled i && thQuotesEnabled i) }
+        ifBit UnicodeSyntaxBit `alexAndPred`
+        ifBit ThQuotesBit }
     { token (ITcloseQuote UnicodeSyntax) }
 }
 
@@ -413,38 +402,45 @@ $tab          { warnTab }
 <0> {
     [^ $idchar \) ] ^
   "@"
-    / { ifExtension typeApplicationEnabled `alexAndPred` notFollowedBySymbol }
+    / { ifBit TypeApplicationsBit `alexAndPred` notFollowedBySymbol }
     { token ITtypeApp }
 }
 
 <0> {
-  "(|" / { ifExtension arrowsEnabled `alexAndPred` notFollowedBySymbol }
-                                        { special (IToparenbar NormalSyntax) }
-  "|)" / { ifExtension arrowsEnabled }  { special (ITcparenbar NormalSyntax) }
+  "(|"
+    / { ifBit ArrowsBit `alexAndPred`
+        notFollowedBySymbol }
+    { special (IToparenbar NormalSyntax) }
+  "|)"
+    / { ifBit ArrowsBit }
+    { special (ITcparenbar NormalSyntax) }
 
   $unigraphic -- ⦇
     / { ifCurrentChar '⦇' `alexAndPred`
-        ifExtension (\i -> unicodeSyntaxEnabled i && arrowsEnabled i) }
+        ifBit UnicodeSyntaxBit `alexAndPred`
+        ifBit ArrowsBit }
     { special (IToparenbar UnicodeSyntax) }
   $unigraphic -- ⦈
     / { ifCurrentChar '⦈' `alexAndPred`
-        ifExtension (\i -> unicodeSyntaxEnabled i && arrowsEnabled i) }
+        ifBit UnicodeSyntaxBit `alexAndPred`
+        ifBit ArrowsBit }
     { special (ITcparenbar UnicodeSyntax) }
 }
 
 <0> {
-  \? @varid / { ifExtension ipEnabled } { skip_one_varid ITdupipvarid }
+  \? @varid / { ifBit IpBit } { skip_one_varid ITdupipvarid }
 }
 
 <0> {
-  "#" @varid / { ifExtension overloadedLabelsEnabled }
-               { skip_one_varid ITlabelvarid }
+  "#" @varid / { ifBit OverloadedLabelsBit } { skip_one_varid ITlabelvarid }
 }
 
 <0> {
-  "(#" / { orExtensions unboxedTuplesEnabled unboxedSumsEnabled }
+  "(#" / { ifBit UnboxedTuplesBit `alexOrPred`
+           ifBit UnboxedSumsBit }
          { token IToubxparen }
-  "#)" / { orExtensions unboxedTuplesEnabled unboxedSumsEnabled }
+  "#)" / { ifBit UnboxedTuplesBit `alexOrPred`
+           ifBit UnboxedSumsBit }
          { token ITcubxparen }
 }
 
@@ -469,10 +465,10 @@ $tab          { warnTab }
 }
 
 <0> {
-  @qvarid "#"+      / { ifExtension magicHashEnabled } { idtoken qvarid }
-  @qconid "#"+      / { ifExtension magicHashEnabled } { idtoken qconid }
-  @varid "#"+       / { ifExtension magicHashEnabled } { varid }
-  @conid "#"+       / { ifExtension magicHashEnabled } { idtoken conid }
+  @qvarid "#"+      / { ifBit MagicHashBit } { idtoken qvarid }
+  @qconid "#"+      / { ifBit MagicHashBit } { idtoken qconid }
+  @varid "#"+       / { ifBit MagicHashBit } { varid }
+  @conid "#"+       / { ifBit MagicHashBit } { idtoken conid }
 }
 
 -- ToDo: - move `var` and (sym) into lexical syntax?
@@ -498,49 +494,51 @@ $tab          { warnTab }
 --
 <0> {
   -- Normal integral literals (:: Num a => a, from Integer)
-  @decimal                                                               { tok_num positive 0 0 decimal }
-  0[bB] @numspc @binary        / { ifExtension binaryLiteralsEnabled }   { tok_num positive 2 2 binary }
-  0[oO] @numspc @octal                                                   { tok_num positive 2 2 octal }
-  0[xX] @numspc @hexadecimal                                             { tok_num positive 2 2 hexadecimal }
-  @negative @decimal           / { ifExtension negativeLiteralsEnabled } { tok_num negative 1 1 decimal }
-  @negative 0[bB] @numspc @binary  / { ifExtension negativeLiteralsEnabled `alexAndPred`
-                                       ifExtension binaryLiteralsEnabled }   { tok_num negative 3 3 binary }
-  @negative 0[oO] @numspc @octal   / { ifExtension negativeLiteralsEnabled } { tok_num negative 3 3 octal }
-  @negative 0[xX] @numspc @hexadecimal / { ifExtension negativeLiteralsEnabled } { tok_num negative 3 3 hexadecimal }
+  @decimal                                                             { tok_num positive 0 0 decimal }
+  0[bB] @numspc @binary                / { ifBit BinaryLiteralsBit }   { tok_num positive 2 2 binary }
+  0[oO] @numspc @octal                                                 { tok_num positive 2 2 octal }
+  0[xX] @numspc @hexadecimal                                           { tok_num positive 2 2 hexadecimal }
+  @negative @decimal                   / { ifBit NegativeLiteralsBit } { tok_num negative 1 1 decimal }
+  @negative 0[bB] @numspc @binary      / { ifBit NegativeLiteralsBit `alexAndPred`
+                                           ifBit BinaryLiteralsBit }   { tok_num negative 3 3 binary }
+  @negative 0[oO] @numspc @octal       / { ifBit NegativeLiteralsBit } { tok_num negative 3 3 octal }
+  @negative 0[xX] @numspc @hexadecimal / { ifBit NegativeLiteralsBit } { tok_num negative 3 3 hexadecimal }
 
   -- Normal rational literals (:: Fractional a => a, from Rational)
-  @floating_point                                                        { tok_frac 0 tok_float }
-  @negative @floating_point    / { ifExtension negativeLiteralsEnabled } { tok_frac 0 tok_float }
-  0[xX] @numspc @hex_floating_point     / { ifExtension hexFloatLiteralsEnabled } { tok_frac 0 tok_hex_float }
-  @negative 0[xX] @numspc @hex_floating_point / { ifExtension hexFloatLiteralsEnabled `alexAndPred`
-                                                  ifExtension negativeLiteralsEnabled } { tok_frac 0 tok_hex_float }
+  @floating_point                                                      { tok_frac 0 tok_float }
+  @negative @floating_point            / { ifBit NegativeLiteralsBit } { tok_frac 0 tok_float }
+  0[xX] @numspc @hex_floating_point    / { ifBit HexFloatLiteralsBit } { tok_frac 0 tok_hex_float }
+  @negative 0[xX] @numspc @hex_floating_point
+                                       / { ifBit HexFloatLiteralsBit `alexAndPred`
+                                           ifBit NegativeLiteralsBit } { tok_frac 0 tok_hex_float }
 }
 
 <0> {
   -- Unboxed ints (:: Int#) and words (:: Word#)
   -- It's simpler (and faster?) to give separate cases to the negatives,
   -- especially considering octal/hexadecimal prefixes.
-  @decimal                     \# / { ifExtension magicHashEnabled } { tok_primint positive 0 1 decimal }
-  0[bB] @numspc @binary        \# / { ifExtension magicHashEnabled `alexAndPred`
-                                      ifExtension binaryLiteralsEnabled } { tok_primint positive 2 3 binary }
-  0[oO] @numspc @octal         \# / { ifExtension magicHashEnabled } { tok_primint positive 2 3 octal }
-  0[xX] @numspc @hexadecimal   \# / { ifExtension magicHashEnabled } { tok_primint positive 2 3 hexadecimal }
-  @negative @decimal           \# / { ifExtension magicHashEnabled } { tok_primint negative 1 2 decimal }
-  @negative 0[bB] @numspc @binary  \# / { ifExtension magicHashEnabled `alexAndPred`
-                                          ifExtension binaryLiteralsEnabled } { tok_primint negative 3 4 binary }
-  @negative 0[oO] @numspc @octal   \# / { ifExtension magicHashEnabled } { tok_primint negative 3 4 octal }
-  @negative 0[xX] @numspc @hexadecimal \# / { ifExtension magicHashEnabled } { tok_primint negative 3 4 hexadecimal }
+  @decimal                          \# / { ifBit MagicHashBit }        { tok_primint positive 0 1 decimal }
+  0[bB] @numspc @binary             \# / { ifBit MagicHashBit `alexAndPred`
+                                           ifBit BinaryLiteralsBit }   { tok_primint positive 2 3 binary }
+  0[oO] @numspc @octal              \# / { ifBit MagicHashBit }        { tok_primint positive 2 3 octal }
+  0[xX] @numspc @hexadecimal        \# / { ifBit MagicHashBit }        { tok_primint positive 2 3 hexadecimal }
+  @negative @decimal                \# / { ifBit MagicHashBit }        { tok_primint negative 1 2 decimal }
+  @negative 0[bB] @numspc @binary   \# / { ifBit MagicHashBit `alexAndPred`
+                                           ifBit BinaryLiteralsBit }   { tok_primint negative 3 4 binary }
+  @negative 0[oO] @numspc @octal    \# / { ifBit MagicHashBit }        { tok_primint negative 3 4 octal }
+  @negative 0[xX] @numspc @hexadecimal \#
+                                       / { ifBit MagicHashBit }        { tok_primint negative 3 4 hexadecimal }
 
-  @decimal                     \# \# / { ifExtension magicHashEnabled } { tok_primword 0 2 decimal }
-  0[bB] @numspc @binary        \# \# / { ifExtension magicHashEnabled `alexAndPred`
-                                         ifExtension binaryLiteralsEnabled } { tok_primword 2 4 binary }
-  0[oO] @numspc @octal         \# \# / { ifExtension magicHashEnabled } { tok_primword 2 4 octal }
-  0[xX] @numspc @hexadecimal   \# \# / { ifExtension magicHashEnabled } { tok_primword 2 4 hexadecimal }
+  @decimal                       \# \# / { ifBit MagicHashBit }        { tok_primword 0 2 decimal }
+  0[bB] @numspc @binary          \# \# / { ifBit MagicHashBit `alexAndPred`
+                                           ifBit BinaryLiteralsBit }   { tok_primword 2 4 binary }
+  0[oO] @numspc @octal           \# \# / { ifBit MagicHashBit }        { tok_primword 2 4 octal }
+  0[xX] @numspc @hexadecimal     \# \# / { ifBit MagicHashBit }        { tok_primword 2 4 hexadecimal }
 
   -- Unboxed floats and doubles (:: Float#, :: Double#)
   -- prim_{float,double} work with signed literals
-  @signed @floating_point \# / { ifExtension magicHashEnabled } { tok_frac 1 tok_primfloat }
-  @signed @floating_point \# \# / { ifExtension magicHashEnabled } { tok_frac 2 tok_primdouble }
+  @signed @floating_point           \# / { ifBit MagicHashBit }        { tok_frac 1 tok_primfloat }
+  @signed @floating_point        \# \# / { ifBit MagicHashBit }        { tok_frac 2 tok_primdouble }
 }
 
 -- Strings and chars are lexed by hand-written code.  The reason is
@@ -759,29 +757,29 @@ data Token
   -- Arrow notation extension
   | ITproc
   | ITrec
-  | IToparenbar  IsUnicodeSyntax --  (|
-  | ITcparenbar  IsUnicodeSyntax --  |)
-  | ITlarrowtail IsUnicodeSyntax --  -<
-  | ITrarrowtail IsUnicodeSyntax --  >-
-  | ITLarrowtail IsUnicodeSyntax --  -<<
-  | ITRarrowtail IsUnicodeSyntax --  >>-
+  | IToparenbar  IsUnicodeSyntax -- ^ @(|@
+  | ITcparenbar  IsUnicodeSyntax -- ^ @|)@
+  | ITlarrowtail IsUnicodeSyntax -- ^ @-<@
+  | ITrarrowtail IsUnicodeSyntax -- ^ @>-@
+  | ITLarrowtail IsUnicodeSyntax -- ^ @-<<@
+  | ITRarrowtail IsUnicodeSyntax -- ^ @>>-@
 
-  -- type application '@' (lexed differently than as-pattern '@',
+  -- | Type application '@' (lexed differently than as-pattern '@',
   -- due to checking for preceding whitespace)
   | ITtypeApp
 
 
-  | ITunknown String            -- Used when the lexer can't make sense of it
-  | ITeof                       -- end of file token
+  | ITunknown String             -- ^ Used when the lexer can't make sense of it
+  | ITeof                        -- ^ end of file token
 
   -- Documentation annotations
-  | ITdocCommentNext  String     -- something beginning '-- |'
-  | ITdocCommentPrev  String     -- something beginning '-- ^'
-  | ITdocCommentNamed String     -- something beginning '-- $'
-  | ITdocSection      Int String -- a section heading
-  | ITdocOptions      String     -- doc options (prune, ignore-exports, etc)
-  | ITlineComment     String     -- comment starting by "--"
-  | ITblockComment    String     -- comment in {- -}
+  | ITdocCommentNext  String     -- ^ something beginning @-- |@
+  | ITdocCommentPrev  String     -- ^ something beginning @-- ^@
+  | ITdocCommentNamed String     -- ^ something beginning @-- $@
+  | ITdocSection      Int String -- ^ a section heading
+  | ITdocOptions      String     -- ^ doc options (prune, ignore-exports, etc)
+  | ITlineComment     String     -- ^ comment starting by "--"
+  | ITblockComment    String     -- ^ comment in {- -}
 
   deriving Show
 
@@ -881,56 +879,52 @@ Also, note that these are included in the `varid` production in the parser --
 a key detail to make all this work.
 -------------------------------------}
 
-reservedSymsFM :: UniqFM (Token, ExtsBitmap -> Bool)
+reservedSymsFM :: UniqFM (Token, IsUnicodeSyntax, ExtsBitmap)
 reservedSymsFM = listToUFM $
-    map (\ (x,y,z) -> (mkFastString x,(y,z)))
-      [ ("..",  ITdotdot,              always)
+    map (\ (x,w,y,z) -> (mkFastString x,(w,y,z)))
+      [ ("..",  ITdotdot,                   NormalSyntax,  0 ) 
         -- (:) is a reserved op, meaning only list cons
-       ,(":",   ITcolon,               always)
-       ,("::",  ITdcolon NormalSyntax, always)
-       ,("=",   ITequal,               always)
-       ,("\\",  ITlam,                 always)
-       ,("|",   ITvbar,                always)
-       ,("<-",  ITlarrow NormalSyntax, always)
-       ,("->",  ITrarrow NormalSyntax, always)
-       ,("@",   ITat,                  always)
-       ,("~",   ITtilde,               always)
-       ,("=>",  ITdarrow NormalSyntax, always)
-       ,("-",   ITminus,               always)
-       ,("!",   ITbang,                always)
+       ,(":",   ITcolon,                    NormalSyntax,  0 )
+       ,("::",  ITdcolon NormalSyntax,      NormalSyntax,  0 )
+       ,("=",   ITequal,                    NormalSyntax,  0 )
+       ,("\\",  ITlam,                      NormalSyntax,  0 )
+       ,("|",   ITvbar,                     NormalSyntax,  0 )
+       ,("<-",  ITlarrow NormalSyntax,      NormalSyntax,  0 )
+       ,("->",  ITrarrow NormalSyntax,      NormalSyntax,  0 )
+       ,("@",   ITat,                       NormalSyntax,  0 )
+       ,("~",   ITtilde,                    NormalSyntax,  0 )
+       ,("=>",  ITdarrow NormalSyntax,      NormalSyntax,  0 )
+       ,("-",   ITminus,                    NormalSyntax,  0 )
+       ,("!",   ITbang,                     NormalSyntax,  0 )
 
-       ,("*", ITstar NormalSyntax, starIsTypeEnabled)
+       ,("*",   ITstar NormalSyntax,        NormalSyntax,  xbit StarIsTypeBit)
 
         -- For 'forall a . t'
-       ,(".", ITdot,  always) -- \i -> explicitForallEnabled i || inRulePrag i)
+       ,(".",   ITdot,                      NormalSyntax,  0 )
 
-       ,("-<",  ITlarrowtail NormalSyntax, arrowsEnabled)
-       ,(">-",  ITrarrowtail NormalSyntax, arrowsEnabled)
-       ,("-<<", ITLarrowtail NormalSyntax, arrowsEnabled)
-       ,(">>-", ITRarrowtail NormalSyntax, arrowsEnabled)
+       ,("-<",  ITlarrowtail NormalSyntax,  NormalSyntax,  xbit ArrowsBit)
+       ,(">-",  ITrarrowtail NormalSyntax,  NormalSyntax,  xbit ArrowsBit)
+       ,("-<<", ITLarrowtail NormalSyntax,  NormalSyntax,  xbit ArrowsBit)
+       ,(">>-", ITRarrowtail NormalSyntax,  NormalSyntax,  xbit ArrowsBit)
 
-       ,("∷",   ITdcolon UnicodeSyntax, unicodeSyntaxEnabled)
-       ,("⇒",   ITdarrow UnicodeSyntax, unicodeSyntaxEnabled)
-       ,("∀",   ITforall UnicodeSyntax, unicodeSyntaxEnabled)
-       ,("→",   ITrarrow UnicodeSyntax, unicodeSyntaxEnabled)
-       ,("←",   ITlarrow UnicodeSyntax, unicodeSyntaxEnabled)
+       ,("∷",   ITdcolon UnicodeSyntax,     UnicodeSyntax, 0 )
+       ,("⇒",   ITdarrow UnicodeSyntax,     UnicodeSyntax, 0 )
+       ,("∀",   ITforall UnicodeSyntax,     UnicodeSyntax, 0 )
+       ,("→",   ITrarrow UnicodeSyntax,     UnicodeSyntax, 0 )
+       ,("←",   ITlarrow UnicodeSyntax,     UnicodeSyntax, 0 )
 
-       ,("⤙",   ITlarrowtail UnicodeSyntax,
-                                \i -> unicodeSyntaxEnabled i && arrowsEnabled i)
-       ,("⤚",   ITrarrowtail UnicodeSyntax,
-                                \i -> unicodeSyntaxEnabled i && arrowsEnabled i)
-       ,("⤛",   ITLarrowtail UnicodeSyntax,
-                                \i -> unicodeSyntaxEnabled i && arrowsEnabled i)
-       ,("⤜",   ITRarrowtail UnicodeSyntax,
-                                \i -> unicodeSyntaxEnabled i && arrowsEnabled i)
-       ,("★",   ITstar UnicodeSyntax,
-                  \i -> unicodeSyntaxEnabled i && starIsTypeEnabled i)
+       ,("⤙",   ITlarrowtail UnicodeSyntax, UnicodeSyntax, xbit ArrowsBit)
+       ,("⤚",   ITrarrowtail UnicodeSyntax, UnicodeSyntax, xbit ArrowsBit)
+       ,("⤛",   ITLarrowtail UnicodeSyntax, UnicodeSyntax, xbit ArrowsBit)
+       ,("⤜",   ITRarrowtail UnicodeSyntax, UnicodeSyntax, xbit ArrowsBit)
+       
+       ,("★",   ITstar UnicodeSyntax,       UnicodeSyntax, xbit StarIsTypeBit)
 
         -- ToDo: ideally, → and ∷ should be "specials", so that they cannot
         -- form part of a large operator.  This would let us have a better
         -- syntax for kinds: ɑ∷*→* would be a legal kind signature. (maybe).
        ]
-
+ 
 -- -----------------------------------------------------------------------------
 -- Lexer actions
 
@@ -967,21 +961,21 @@ pop _span _buf _len = do _ <- popLexState
 -- See Note [Nested comment line pragmas]
 failLinePrag1 :: Action
 failLinePrag1 span _buf _len = do
-  b <- extension inNestedComment
+  b <- getBit InNestedCommentBit
   if b then return (L span ITcomment_line_prag)
        else lexError "lexical error in pragma"
 
 -- See Note [Nested comment line pragmas]
 popLinePrag1 :: Action
 popLinePrag1 span _buf _len = do
-  b <- extension inNestedComment
+  b <- getBit InNestedCommentBit
   if b then return (L span ITcomment_line_prag) else do
     _ <- popLexState
     lexToken
 
 hopefully_open_brace :: Action
 hopefully_open_brace span buf len
- = do relaxed <- extension relaxedLayout
+ = do relaxed <- getBit RelaxedLayoutBit
       ctx <- getContext
       (AI l _) <- getInput
       let offset = srcLocCol l
@@ -1027,8 +1021,8 @@ ifCurrentChar char _ (AI _ buf) _ _
 -- the non-layout states.
 isNormalComment :: AlexAccPred ExtsBitmap
 isNormalComment bits _ _ (AI _ buf)
-  | haddockEnabled bits = notFollowedByDocOrPragma
-  | otherwise           = nextCharIsNot buf (== '#')
+  | HaddockBit `xtest` bits = notFollowedByDocOrPragma
+  | otherwise               = nextCharIsNot buf (== '#')
   where
     notFollowedByDocOrPragma
        = afterOptionalSpace buf (\b -> nextCharIsNot b (`elem` "|^*$#"))
@@ -1042,11 +1036,14 @@ afterOptionalSpace buf p
 atEOL :: AlexAccPred ExtsBitmap
 atEOL _ _ _ (AI _ buf) = atEnd buf || currentChar buf == '\n'
 
-ifExtension :: (ExtsBitmap -> Bool) -> AlexAccPred ExtsBitmap
-ifExtension pred bits _ _ _ = pred bits
+ifBit :: ExtBits -> AlexAccPred ExtsBitmap
+ifBit extBits bits _ _ _ = extBits `xtest` bits
 
-orExtensions :: (ExtsBitmap -> Bool) -> (ExtsBitmap -> Bool) -> AlexAccPred ExtsBitmap
-orExtensions pred1 pred2 bits _ _ _ = pred1 bits || pred2 bits
+alexNotPred p userState in1 len in2
+  = not (p userState in1 len in2)
+
+alexOrPred p1 p2 userState in1 len in2
+  = p1 userState in1 len in2 || p2 userState in1 len in2
 
 multiline_doc_comment :: Action
 multiline_doc_comment span buf _len = withLexedDocType (worker "")
@@ -1089,7 +1086,7 @@ multiline_doc_comment span buf _len = withLexedDocType (worker "")
 
 lineCommentToken :: Action
 lineCommentToken span buf len = do
-  b <- extension rawTokenStreamEnabled
+  b <- getBit RawTokenStreamBit
   if b then strtoken ITlineComment span buf len else lexToken
 
 {-
@@ -1103,7 +1100,7 @@ nested_comment cont span buf len = do
   where
     go commentAcc 0 input = do
       setInput input
-      b <- extension rawTokenStreamEnabled
+      b <- getBit RawTokenStreamBit
       if b
         then docCommentEnd input commentAcc ITblockComment buf span
         else cont
@@ -1321,7 +1318,7 @@ varid span buf len =
       lastTk <- getLastTk
       keyword <- case lastTk of
         Just ITlam -> do
-          lambdaCase <- extension lambdaCaseEnabled
+          lambdaCase <- getBit LambdaCaseBit 
           if lambdaCase
             then return ITlcase
             else failMsgP "Illegal lambda-case (use -XLambdaCase)"
@@ -1331,9 +1328,9 @@ varid span buf len =
     Just (keyword, 0) -> do
       maybe_layout keyword
       return $ L span keyword
-    Just (keyword, exts) -> do
-      extsEnabled <- extension $ \i -> exts .&. i /= 0
-      if extsEnabled
+    Just (keyword, i) -> do
+      exts <- getExts
+      if exts .&. i /= 0
         then do
           maybe_layout keyword
           return $ L span keyword
@@ -1358,11 +1355,18 @@ consym = sym ITconsym
 sym :: (FastString -> Token) -> Action
 sym con span buf len =
   case lookupUFM reservedSymsFM fs of
-    Just (keyword, exts) -> do
-      extsEnabled <- extension exts
-      let !tk | extsEnabled = keyword
-              | otherwise   = con fs
-      return $ L span tk
+    Just (keyword, NormalSyntax, 0) ->
+      return $ L span keyword
+    Just (keyword, NormalSyntax, i) -> do
+      exts <- getExts
+      if exts .&. i /= 0
+        then return $ L span keyword
+        else return $ L span (con fs)
+    Just (keyword, UnicodeSyntax, i) -> do
+      exts <- getExts
+      if exts .&. i /= 0 && xtest UnicodeSyntaxBit exts
+        then return $ L span keyword
+        else return $ L span (con fs)
     Nothing ->
       return $ L span $! con fs
   where
@@ -1375,7 +1379,7 @@ tok_integral :: (SourceText -> Integer -> Token)
              -> (Integer, (Char -> Int))
              -> Action
 tok_integral itint transint transbuf translen (radix,char_to_int) span buf len = do
-  numericUnderscores <- extension numericUnderscoresEnabled  -- #14473
+  numericUnderscores <- getBit NumericUnderscoresBit  -- #14473
   let src = lexemeToString buf len
   if (not numericUnderscores) && ('_' `elem` src)
     then failMsgP "Use NumericUnderscores to allow underscores in integer literals"
@@ -1413,7 +1417,7 @@ hexadecimal = (16,hexDigit)
 -- readRational can understand negative rationals, exponents, everything.
 tok_frac :: Int -> (String -> Token) -> Action
 tok_frac drop f span buf len = do
-  numericUnderscores <- extension numericUnderscoresEnabled  -- #14473
+  numericUnderscores <- getBit NumericUnderscoresBit  -- #14473
   let src = lexemeToString buf (len-drop)
   if (not numericUnderscores) && ('_' `elem` src)
     then failMsgP "Use NumericUnderscores to allow underscores in floating literals"
@@ -1445,7 +1449,7 @@ readHexFractionalLit str =
 do_bol :: Action
 do_bol span _str _len = do
         -- See Note [Nested comment line pragmas]
-        b <- extension inNestedComment
+        b <- getBit InNestedCommentBit
         if b then return (L span ITcomment_line_prag) else do
           (pos, gen_semic) <- getOffside
           case pos of
@@ -1472,7 +1476,7 @@ maybe_layout t = do -- If the alternative layout rule is enabled then
                     -- inserting implicit semi-colons, is therefore
                     -- irrelevant as it only applies in an implicit
                     -- context.
-                    alr <- extension alternativeLayoutRule
+                    alr <- getBit AlternativeLayoutRuleBit
                     unless alr $ f t
     where f ITdo    = pushLexState layout_do
           f ITmdo   = pushLexState layout_do
@@ -1498,7 +1502,7 @@ new_layout_context strict gen_semic tok span _buf len = do
     (AI l _) <- getInput
     let offset = srcLocCol l - len
     ctx <- getContext
-    nondecreasing <- extension nondecreasingIndentation
+    nondecreasing <- getBit NondecreasingIndentationBit
     let strict' = strict || not nondecreasing
     case ctx of
         Layout prev_off _ : _  |
@@ -1614,7 +1618,7 @@ lex_string s = do
 
     Just ('"',i)  -> do
         setInput i
-        magicHash <- extension magicHashEnabled
+        magicHash <- getBit MagicHashBit 
         if magicHash
           then do
             i <- getInput
@@ -1701,7 +1705,7 @@ lex_char_tok span buf _len = do        -- We've seen '
 finish_char_tok :: StringBuffer -> RealSrcLoc -> Char -> P (RealLocated Token)
 finish_char_tok buf loc ch  -- We've already seen the closing quote
                         -- Just need to check for trailing #
-  = do  magicHash <- extension magicHashEnabled
+  = do  magicHash <- getBit MagicHashBit 
         i@(AI end bufEnd) <- getInput
         let src = lexemeToString buf (cur bufEnd - cur buf)
         if magicHash then do
@@ -2054,9 +2058,6 @@ getPState = P $ \s -> POk s s
 withThisPackage :: (UnitId -> a) -> P a
 withThisPackage f = P $ \s@(PState{options = o}) -> POk s (f (pThisPackage o))
 
-extension :: (ExtsBitmap -> Bool) -> P Bool
-extension p = P $ \s -> POk s (p $! (pExtsBitmap . options) s)
-
 getExts :: P ExtsBitmap
 getExts = P $ \s -> POk s (pExtsBitmap . options $ s)
 
@@ -2241,9 +2242,6 @@ getALRContext = P $ \s@(PState {alr_context = cs}) -> POk s cs
 setALRContext :: [ALRContext] -> P ()
 setALRContext cs = P $ \s -> POk (s {alr_context = cs}) ()
 
-getALRTransitional :: P Bool
-getALRTransitional = extension alternativeLayoutTransitionalRule
-
 getJustClosedExplicitLetBlock :: P Bool
 getJustClosedExplicitLetBlock
  = P $ \s@(PState {alr_justClosedExplicitLetBlock = b}) -> POk s b
@@ -2278,10 +2276,15 @@ getAlrExpectingOCurly = P $ \s@(PState {alr_expecting_ocurly = b}) -> POk s b
 setAlrExpectingOCurly :: Maybe ALRLayout -> P ()
 setAlrExpectingOCurly b = P $ \s -> POk (s {alr_expecting_ocurly = b}) ()
 
--- for reasons of efficiency, flags indicating language extensions (eg,
--- -fglasgow-exts or -XParallelArrays) are represented by a bitmap
--- stored in an unboxed Word64
+-- | For reasons of efficiency, boolean parsing flags (eg, language extensions
+-- or whether we are currently in a @RULE@ pragma) are represented by a bitmap
+-- stored in a @Word64@.
 type ExtsBitmap = Word64
+
+-- | Check if a given flag is currently set in the bitmap.
+getBit :: ExtBits -> P Bool
+getBit ext = P $ \s -> let b =  ext `xtest` pExtsBitmap (options s)
+                       in b `seq` POk s b 
 
 xbit :: ExtBits -> ExtsBitmap
 xbit = bit . fromEnum
@@ -2289,8 +2292,10 @@ xbit = bit . fromEnum
 xtest :: ExtBits -> ExtsBitmap -> Bool
 xtest ext xmap = testBit xmap (fromEnum ext)
 
--- | Subset of the language extensions that impact lexing and parsing.
+-- | Various boolean flags, mostly language extensions, that impact lexing and
+-- parsing. Note that a handful of these can change during lexing/parsing.
 data ExtBits
+  -- Flags that are constant once parsing starts
   = FfiBit
   | InterruptibleFfiBit
   | CApiFfiBit
@@ -2312,8 +2317,6 @@ data ExtBits
   | DatatypeContextsBit
   | TransformComprehensionsBit
   | QqBit -- enable quasiquoting
-  | InRulePragBit
-  | InNestedCommentBit -- See Note [Nested comment line pragmas]
   | RawTokenStreamBit -- producing a token stream with all comments included
   | AlternativeLayoutRuleBit
   | ALRTransitionalBit
@@ -2335,85 +2338,13 @@ data ExtBits
   | DoAndIfThenElseBit
   | MultiWayIfBit
   | GadtSyntaxBit
+  
+  -- Flags that are updated once parsing starts
+  | InRulePragBit
+  | InNestedCommentBit -- See Note [Nested comment line pragmas]
   deriving Enum
 
-always :: ExtsBitmap -> Bool
-always           _     = True
-arrowsEnabled :: ExtsBitmap -> Bool
-arrowsEnabled = xtest ArrowsBit
-thEnabled :: ExtsBitmap -> Bool
-thEnabled = xtest ThBit
-thQuotesEnabled :: ExtsBitmap -> Bool
-thQuotesEnabled = xtest ThQuotesBit
-ipEnabled :: ExtsBitmap -> Bool
-ipEnabled = xtest IpBit
-overloadedLabelsEnabled :: ExtsBitmap -> Bool
-overloadedLabelsEnabled = xtest OverloadedLabelsBit
-explicitForallEnabled :: ExtsBitmap -> Bool
-explicitForallEnabled = xtest ExplicitForallBit
-bangPatEnabled :: ExtsBitmap -> Bool
-bangPatEnabled = xtest BangPatBit
-haddockEnabled :: ExtsBitmap -> Bool
-haddockEnabled = xtest HaddockBit
-magicHashEnabled :: ExtsBitmap -> Bool
-magicHashEnabled = xtest MagicHashBit
-unicodeSyntaxEnabled :: ExtsBitmap -> Bool
-unicodeSyntaxEnabled = xtest UnicodeSyntaxBit
-unboxedTuplesEnabled :: ExtsBitmap -> Bool
-unboxedTuplesEnabled = xtest UnboxedTuplesBit
-unboxedSumsEnabled :: ExtsBitmap -> Bool
-unboxedSumsEnabled = xtest UnboxedSumsBit
-datatypeContextsEnabled :: ExtsBitmap -> Bool
-datatypeContextsEnabled = xtest DatatypeContextsBit
-monadComprehensionsEnabled :: ExtsBitmap -> Bool
-monadComprehensionsEnabled = xtest TransformComprehensionsBit
-qqEnabled :: ExtsBitmap -> Bool
-qqEnabled = xtest QqBit
-inRulePrag :: ExtsBitmap -> Bool
-inRulePrag = xtest InRulePragBit
-inNestedComment :: ExtsBitmap -> Bool
-inNestedComment = xtest InNestedCommentBit
-rawTokenStreamEnabled :: ExtsBitmap -> Bool
-rawTokenStreamEnabled = xtest RawTokenStreamBit
-alternativeLayoutRule :: ExtsBitmap -> Bool
-alternativeLayoutRule = xtest AlternativeLayoutRuleBit
-alternativeLayoutTransitionalRule :: ExtsBitmap -> Bool
-alternativeLayoutTransitionalRule = xtest ALRTransitionalBit
-relaxedLayout :: ExtsBitmap -> Bool
-relaxedLayout = xtest RelaxedLayoutBit
-nondecreasingIndentation :: ExtsBitmap -> Bool
-nondecreasingIndentation = xtest NondecreasingIndentationBit
-traditionalRecordSyntaxEnabled :: ExtsBitmap -> Bool
-traditionalRecordSyntaxEnabled = xtest TraditionalRecordSyntaxBit
 
-explicitNamespacesEnabled :: ExtsBitmap -> Bool
-explicitNamespacesEnabled = xtest ExplicitNamespacesBit
-lambdaCaseEnabled :: ExtsBitmap -> Bool
-lambdaCaseEnabled = xtest LambdaCaseBit
-binaryLiteralsEnabled :: ExtsBitmap -> Bool
-binaryLiteralsEnabled = xtest BinaryLiteralsBit
-negativeLiteralsEnabled :: ExtsBitmap -> Bool
-negativeLiteralsEnabled = xtest NegativeLiteralsBit
-hexFloatLiteralsEnabled :: ExtsBitmap -> Bool
-hexFloatLiteralsEnabled = xtest HexFloatLiteralsBit
-patternSynonymsEnabled :: ExtsBitmap -> Bool
-patternSynonymsEnabled = xtest PatternSynonymsBit
-typeApplicationEnabled :: ExtsBitmap -> Bool
-typeApplicationEnabled = xtest TypeApplicationsBit
-numericUnderscoresEnabled :: ExtsBitmap -> Bool
-numericUnderscoresEnabled = xtest NumericUnderscoresBit
-starIsTypeEnabled :: ExtsBitmap -> Bool
-starIsTypeEnabled = xtest StarIsTypeBit
-blockArgumentsEnabled :: ExtsBitmap -> Bool
-blockArgumentsEnabled = xtest BlockArgumentsBit
-nPlusKPatternsEnabled :: ExtsBitmap -> Bool
-nPlusKPatternsEnabled = xtest NPlusKPatternsBit
-doAndIfThenElseEnabled :: ExtsBitmap -> Bool
-doAndIfThenElseEnabled = xtest DoAndIfThenElseBit
-multiWayIfEnabled :: ExtsBitmap -> Bool
-multiWayIfEnabled = xtest MultiWayIfBit
-gadtSyntaxEnabled :: ExtsBitmap -> Bool
-gadtSyntaxEnabled = xtest GadtSyntaxBit
 
 
 
@@ -2640,8 +2571,8 @@ srcParseErr options buf len
         pattern = decodePrevNChars 8 buf
         last100 = decodePrevNChars 100 buf
         mdoInLast100 = "mdo" `isInfixOf` last100
-        th_enabled = thEnabled (pExtsBitmap options)
-        ps_enabled = patternSynonymsEnabled (pExtsBitmap options)
+        th_enabled = ThBit `xtest` pExtsBitmap options
+        ps_enabled = PatternSynonymsBit `xtest` pExtsBitmap options
 
 -- Report a parse failure, giving the span of the previous token as
 -- the location of the error.  This is the entry point for errors
@@ -2665,7 +2596,7 @@ lexError str = do
 
 lexer :: Bool -> (Located Token -> P a) -> P a
 lexer queueComments cont = do
-  alr <- extension alternativeLayoutRule
+  alr <- getBit AlternativeLayoutRuleBit
   let lexTokenFun = if alr then lexTokenAlr else lexToken
   (L span tok) <- lexTokenFun
   --trace ("token: " ++ show tok) $ do
@@ -2710,7 +2641,7 @@ alternativeLayoutRuleToken t
     = do context <- getALRContext
          lastLoc <- getAlrLastLoc
          mExpectingOCurly <- getAlrExpectingOCurly
-         transitional <- getALRTransitional
+         transitional <- getBit ALRTransitionalBit
          justClosedExplicitLetBlock <- getJustClosedExplicitLetBlock
          setJustClosedExplicitLetBlock False
          let thisLoc = getLoc t
