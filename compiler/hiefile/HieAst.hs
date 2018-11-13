@@ -36,6 +36,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Array as A
 import Data.List hiding (span)
+import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
 import Data.Coerce
 import Control.Monad.Trans.Reader
@@ -255,7 +256,7 @@ type family ProtectedSig a where
   ProtectedSig GhcTc = NoExt
 
 class ProtectSig a where
-  protectSig :: Scope -> XSigPat a -> ProtectedSig a
+  protectSig :: Scope -> LHsSigWcType (NoGhcTc a) -> ProtectedSig a
 
 instance (HasLoc a) => HasLoc (Shielded a) where
   loc (SH _ a) = loc a
@@ -302,7 +303,8 @@ instance HasLoc a => HasLoc [a] where
   loc xs = foldl1' combineSrcSpans $ map loc xs
 
 instance (HasLoc a, HasLoc b) => HasLoc (FamEqn s a b) where
-  loc (FamEqn _ a b _ c) = foldl1' combineSrcSpans [loc a, loc b, loc c]
+  loc (FamEqn _ a Nothing b _ c) = foldl1' combineSrcSpans [loc a, loc b, loc c]
+  loc (FamEqn _ a (Just tyvars) b _ c) = foldl1' combineSrcSpans [loc a, loc tyvars, loc b, loc c]
   loc _ = noSrcSpan
 
 instance HasLoc (HsDataDefn GhcRn) where
@@ -593,7 +595,7 @@ instance ( ToHie (Context (Located (IdP a)))
         [ mkNode "NPlusKPat"
         , toHie $ C (PatternBind scope pscope rsp) n
         ]
-      SigPat sig pat ->
+      SigPat _ pat sig ->
         [ mkNode "SigPat"
         , toHie $ PS rsp scope pscope pat
         , let cscope = mkLScope pat in
@@ -648,8 +650,8 @@ instance ( ToHie (Context (Located (IdP a)))
          , ToHie (LHsCmdTop a)
          , ToHie (RScoped (GuardLStmt a))
          , ToHie (RScoped (LHsLocalBinds a))
-         , ToHie (TScoped (XAppTypeE a))
-         , ToHie (TScoped (XExprWithTySig a))
+         , ToHie (TScoped (LHsWcType (NoGhcTc a)))
+         , ToHie (TScoped (LHsSigWcType (NoGhcTc a)))
          ) => ToHie (LHsExpr a) where
   toHie e@(L mspan oexpr) = concatM $ case oexpr of
       HsVar _ (L _ var) ->
@@ -692,7 +694,7 @@ instance ( ToHie (Context (Located (IdP a)))
         , toHie a
         , toHie b
         ]
-      HsAppType sig expr ->
+      HsAppType _ expr sig ->
         [ mkNode "HsAppType"
         , toHie expr
         , toHie $ TS (ResolvedScopes []) sig
@@ -768,7 +770,7 @@ instance ( ToHie (Context (Located (IdP a)))
         , toHie expr
         , toHie $ map (RC RecFieldAssign) upds
         ]
-      ExprWithTySig sig expr ->
+      ExprWithTySig _ expr sig ->
         [ mkNode "ExprWithTySig"
         , toHie expr
         , toHie $ TS (ResolvedScopes [mkLScope expr]) sig
@@ -1151,7 +1153,7 @@ instance ToHie (LTyClDecl GhcRn) where
           rhs_scope = foldl1' combineScopes $ map mkScope
             [ loc deps, loc sigs, loc (bagToList meths), loc typs, loc deftyps]
           go :: TyFamDefltEqn GhcRn -> FamEqn GhcRn (TScoped (LHsQTyVars GhcRn)) (LHsType GhcRn)
-          go (FamEqn a var pat b rhs) = FamEqn a var (TS (ResolvedScopes [mkLScope rhs]) pat) b rhs
+          go (FamEqn a var bndrs pat b rhs) = FamEqn a var bndrs (TS (ResolvedScopes [mkLScope rhs]) pat) b rhs
           go (XFamEqn NoExt) = XFamEqn NoExt
       XTyClDecl _ -> []
     where mkNode = makeNode "TyClDecl" span
@@ -1210,11 +1212,15 @@ instance (ToHie pats, ToHie rhs, HasLoc pats, HasLoc rhs)
   toHie (TS _ f) = toHie f
 
 instance (ToHie pats, ToHie rhs, HasLoc pats, HasLoc rhs) => ToHie (FamEqn GhcRn pats rhs) where
-  toHie fe@(FamEqn _ var pats _ rhs) = concatM $
+  toHie fe@(FamEqn _ var tybndrs pats _ rhs) = concatM $
     [ toHie $ C (Decl InstDec $ getRealSpan $ loc fe) var
+    , toHie $ fmap (tvScopes (ResolvedScopes []) scope) tybndrs
     , toHie pats
     , toHie rhs
     ]
+    where scope = combineScopes patsScope rhsScope
+          patsScope = mkScope (loc pats)
+          rhsScope = mkScope (loc rhs)
   toHie (XFamEqn _) = pure []
 
 instance ToHie (LInjectivityAnn GhcRn) where
@@ -1751,16 +1757,20 @@ instance ToHie (LRuleDecls GhcRn) where
     where mkNode = makeNode "RuleDecls" span
 
 instance ToHie (LRuleDecl GhcRn) where
-  toHie (L span decl) = concatM $ case decl of
-      HsRule _ rname _ bndrs exprA exprB ->
+  toHie (L _ (XRuleDecl _)) = pure []
+  toHie (L span (HsRule _ rname _ tybndrs bndrs exprA exprB)) = concatM
         [ mkNode "HsRule"
         , pure $ locOnly $ getLoc rname
+        , toHie $ fmap (tvScopes (ResolvedScopes []) scope) tybndrs
         , toHie $ map (RS $ mkScope span) bndrs
         , toHie exprA
         , toHie exprB
         ]
-      XRuleDecl _ -> []
     where mkNode = makeNode "RuleDecl" span
+          scope = bndrsScopes `combineScopes` exprAScope `combineScopes` exprBScope
+          bndrsScopes = maybe NoScope mkLScope (listToMaybe bndrs)
+          exprAScope = mkLScope exprA
+          exprBScope = mkLScope exprB
 
 instance ToHie (RScoped (LRuleBndr GhcRn)) where
   toHie (RS sc (L span bndr)) = concatM $ case bndr of
