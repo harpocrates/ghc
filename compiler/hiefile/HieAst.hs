@@ -11,6 +11,7 @@ module HieAst (mkHieFile) where
 
 import Class (FunDep)
 import BasicTypes
+import Config (cProjectVersion)
 import FieldLabel
 import BooleanFormula
 import Bag (Bag, bagToList)
@@ -38,14 +39,17 @@ import qualified Data.Array as A
 import Data.List hiding (span)
 import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC
 import Data.Coerce
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Class
 
 import GhcPrelude
 
-type RenamedSource     = (HsGroup GhcRn, [LImportDecl GhcRn], Maybe [(LIE GhcRn, Avails)],
-                          Maybe LHsDocString)
+-- These synonyms match those defined in main/GHC.hs
+type RenamedSource     = ( HsGroup GhcRn, [LImportDecl GhcRn]
+                         , Maybe [(LIE GhcRn, Avails)]
+                         , Maybe LHsDocString )
 type TypecheckedSource = LHsBinds GhcTc
 
 
@@ -87,7 +91,7 @@ mkHieFile ms ts rs = do
   src <- liftIO $ BS.readFile src_file
   return $ HieFile
       { hieVersion = curHieVersion
-      , ghcVersion = "8.7"
+      , ghcVersion = BSC.pack cProjectVersion
       , hsFile = src_file
       , hieTypes = arr
       , hieAST = asts'
@@ -117,7 +121,8 @@ enrichHie ts (hsGrp, imports, exports, _) = flip runReaderT initState $ do
         asts = HieASTs
           $ resolveTyVarScopes
           $ M.map (modulify . mergeSortAsts . coerce)
-          $ M.fromListWith (++) $ map (\x -> (srcSpanFile (nodeSpan x),[x])) flat_asts
+          $ M.fromListWith (++)
+          $ map (\x -> (srcSpanFile (nodeSpan x),[x])) flat_asts
 
         flat_asts = concat
           [ tasts
@@ -145,15 +150,15 @@ getRealSpan (RealSrcSpan sp) = Just sp
 getRealSpan _ = Nothing
 
 grhss_span :: GRHSs p body -> SrcSpan
-grhss_span (GRHSs _ xs binds) = foldr combineSrcSpans (getLoc binds) (getLoc <$> xs)
+grhss_span (GRHSs _ xs binds) = foldl' combineSrcSpans (getLoc binds) (map getLoc xs)
 grhss_span (XGRHSs _) = error "XGRHS has no span"
 
 bindingsOnly :: [Context Name] -> [HieAST a]
 bindingsOnly [] = []
 bindingsOnly (C c n : xs) = case nameSrcSpan n of
-  RealSrcSpan span ->
-      Node (NodeInfo S.empty [] (M.singleton (Right n) info)) span [] : bindingsOnly xs
-    where info = mempty{identInfo = S.singleton c}
+  RealSrcSpan span -> Node nodeinfo span [] : bindingsOnly xs
+    where nodeinfo = NodeInfo S.empty [] (M.singleton (Right n) info)
+          info = mempty{identInfo = S.singleton c}
   _ -> bindingsOnly xs
 
 concatM :: Monad m => [m [a]] -> m [a]
@@ -219,12 +224,12 @@ listScopes rhsScope (pat : pats) = RS sc pat : pats'
     pats'@((RS scope p):_) = listScopes rhsScope pats
     sc = combineScopes scope $ mkScope $ getLoc p
 
--- | listScopes specialised to PScoped things
+-- | 'listScopes' specialised to 'PScoped' things
 patScopes :: Maybe Span -> Scope -> Scope -> [LPat a] -> [PScoped (LPat a)]
 patScopes rsp useScope patScope xs =
   map (\(RS sc a) -> PS rsp useScope sc a) $ listScopes patScope xs
 
--- | listScopes specialised to TVScoped things
+-- | 'listScopes' specialised to 'TVScoped' things
 tvScopes :: TyVarScope -> Scope -> [LHsTyVarBndr a] -> [TVScoped (LHsTyVarBndr a)]
 tvScopes tvScope rhsScope xs =
   map (\(RS sc a)-> TVS tvScope sc a) $ listScopes rhsScope xs
@@ -1280,7 +1285,8 @@ instance ToHie (Located OverlapMode) where
 
 instance ToHie (LConDecl GhcRn) where
   toHie (L span decl) = concatM $ case decl of
-      ConDeclGADT{con_names=names, con_qvars=qvars, con_mb_cxt=ctx, con_args=args, con_res_ty=typ} ->
+      ConDeclGADT { con_names = names, con_qvars = qvars
+                  , con_mb_cxt = ctx, con_args = args, con_res_ty = typ } ->
         [ mkNode "ConDeclGADT"
         , toHie $ map (C (Decl ConDec $ getRealSpan span)) names
         , toHie $ TS (ResolvedScopes [ctxScope, rhsScope]) qvars
@@ -1293,7 +1299,8 @@ instance ToHie (LConDecl GhcRn) where
           ctxScope = maybe NoScope mkLScope ctx
           argsScope = condecl_scope args
           tyScope = mkLScope typ
-      ConDeclH98{con_name=name, con_ex_tvs=qvars, con_mb_cxt=ctx, con_args=dets} ->
+      ConDeclH98 { con_name = name, con_ex_tvs = qvars
+                 , con_mb_cxt = ctx, con_args = dets } ->
         [ mkNode "ConDeclH98"
         , toHie $ C (Decl ConDec $ getRealSpan span) name
         , toHie $ tvScopes (ResolvedScopes []) rhsScope qvars
@@ -1317,7 +1324,9 @@ instance ToHie (Located [LConDeclField GhcRn]) where
     , toHie decls
     ]
 
-instance (HasLoc thing, ToHie (TScoped thing)) => ToHie (TScoped (HsImplicitBndrs GhcRn thing)) where
+instance ( HasLoc thing
+         , ToHie (TScoped thing)
+         ) => ToHie (TScoped (HsImplicitBndrs GhcRn thing)) where
   toHie (TS sc (HsIB ibrn a)) = concatM $
       [ pure $ bindingsOnly $ map (C $ TyVarBind (mkScope span) sc) ibrn
       , toHie $ TS sc a
@@ -1325,7 +1334,9 @@ instance (HasLoc thing, ToHie (TScoped thing)) => ToHie (TScoped (HsImplicitBndr
     where span = loc a
   toHie (TS _ (XHsImplicitBndrs _)) = pure []
 
-instance (HasLoc thing, ToHie (TScoped thing)) => ToHie (TScoped (HsWildCardBndrs GhcRn thing)) where
+instance ( HasLoc thing
+         , ToHie (TScoped thing)
+         ) => ToHie (TScoped (HsWildCardBndrs GhcRn thing)) where
   toHie (TS sc (HsWC names a)) = concatM $
       [ pure $ bindingsOnly $ map (C $ TyVarBind (mkScope span) sc) names
       , toHie $ TS sc a
