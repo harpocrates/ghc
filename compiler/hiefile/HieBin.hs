@@ -190,8 +190,8 @@ putName (HieSymbolTable next ref) bh name = do
       | isGoodSrcSpan (nameSrcSpan name) -> do
       writeIORef ref $! addToUFM symmap name (off, ExternalName mod occ (nameSrcSpan name))
       put_ bh (fromIntegral off :: Word32)
-    Just (off, LocalName{})
-      | notLocal (toHieName name) -> do
+    Just (off, LocalName _occ span)
+      | notLocal (toHieName name) || nameSrcSpan name /= span -> do
       writeIORef ref $! addToUFM symmap name (off, toHieName name)
       put_ bh (fromIntegral off :: Word32)
     Just (off, _) -> put_ bh (fromIntegral off :: Word32)
