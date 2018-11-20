@@ -254,6 +254,7 @@ getHieName bh = do
     2 -> do
       (c,i) <- get bh
       return $ KnownKeyName $ mkUnique c i
+    _ -> panic "HieBin.getHieName: invalid tag"
 
 putEnum :: Enum a => BinHandle -> a -> IO ()
 putEnum bh = putByte bh . fromIntegral . fromEnum
@@ -305,6 +306,7 @@ instance Binary (HieType Int) where
       5 -> HLitTy <$> get bh
       6 -> HCastTy <$> get bh
       7 -> return HCoercionTy
+      _ -> panic "Binary (HieArgs Int): invalid tag"
 
 instance Binary BindType where
   put_ = putEnum
@@ -335,6 +337,7 @@ instance Binary Scope where
       0 -> return NoScope
       1 -> LocalScope <$> get bh
       2 -> return ModuleScope
+      _ -> panic "Binary Scope: invalid tag"
 
 instance Binary TyVarScope where
   put_ bh (ResolvedScopes xs) = do
@@ -350,6 +353,7 @@ instance Binary TyVarScope where
     case t of
       0 -> ResolvedScopes <$> get bh
       1 -> UnresolvedScope <$> get bh <*> get bh
+      _ -> panic "Binary TyVarScope: invalid tag"
 
 instance Binary ContextInfo where
   put_ bh Use = putByte bh 0
@@ -397,6 +401,7 @@ instance Binary ContextInfo where
       7 -> TyVarBind <$> get bh <*> get bh
       8 -> RecField <$> get bh <*> get bh
       9 -> return MatchBind
+      _ -> panic "Binary ContextInfo: invalid tag"
 
 instance Binary (IdentifierDetails Int) where
   put_ bh dets = do
