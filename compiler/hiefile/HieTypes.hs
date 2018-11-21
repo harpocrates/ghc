@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -25,6 +26,7 @@ import Name
 import Module (ModuleName)
 import Control.Applicative ((<|>))
 import IfaceType
+import Data.Data
 
 type Span = RealSrcSpan
 
@@ -39,6 +41,7 @@ external tools that need to work with haskell source don't need to parse,
 typecheck, and rename all over again. These files contain:
 
   * a simplified AST
+
        - nodes are annotated with source positions and types
        - identifiers are annotated with scope information
 
@@ -434,7 +437,7 @@ data Scope
   = NoScope
   | LocalScope Span
   | ModuleScope
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Typeable, Data)
 
 instance Outputable Scope where
   ppr NoScope = text "NoScope"

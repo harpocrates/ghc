@@ -4,7 +4,10 @@
 {-# LANGUAGE FlexibleInstances #-}
 module HieUtils where
 
-import Prelude hiding (span)
+import GhcPrelude
+
+import Data.Data
+
 import HieTypes
 import SrcLoc
 import Name hiding (varName)
@@ -12,7 +15,7 @@ import Type
 import TyCoRep
 import TyCon
 import Var
-import FastString (FastString)
+import FastString (FastString, mkFastString)
 import Data.Monoid
 import Data.Maybe
 import Data.Traversable
@@ -339,12 +342,21 @@ combineScopes x NoScope = x
 combineScopes (LocalScope a) (LocalScope b) =
   mkScope $ combineSrcSpans (RealSrcSpan a) (RealSrcSpan b)
 
-makeNode :: Applicative m => FastString -> SrcSpan -> FastString -> m [HieAST a]
-makeNode typ (RealSrcSpan span) cons = pure [Node (simpleNodeInfo cons typ) span []]
-makeNode _ _ _ = pure []
+{-# INLINEABLE makeNode #-}
+makeNode :: (Applicative m, Data a) => a -> SrcSpan -> m [HieAST b]
+makeNode x spn = pure $ case spn of
+  RealSrcSpan span -> [Node (simpleNodeInfo cons typ) span []]
+  _ -> []
+  where
+    cons = mkFastString . show . toConstr $ x
+    typ = mkFastString . show . typeRepTyCon . typeOf $ x
 
-makeTypeNode :: FastString -> FastString -> SrcSpan -> Type -> [HieAST Type]
-makeTypeNode cons typ spn etyp = case spn of
+{-# INLINEABLE makeTypeNode #-}
+makeTypeNode :: (Applicative m, Data a) => a -> SrcSpan -> Type -> m [HieAST Type]
+makeTypeNode x spn etyp = pure $ case spn of
   RealSrcSpan span ->
     [Node (NodeInfo (S.singleton (cons,typ)) [etyp] M.empty) span []]
   _ -> []
+  where
+    cons = mkFastString . show . toConstr $ x
+    typ = mkFastString . show . typeRepTyCon . typeOf $ x
