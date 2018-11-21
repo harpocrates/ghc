@@ -137,7 +137,3 @@ validateScopes asts = M.foldrWithKey (\k a b -> valid k a ++ b) [] refMap
                      [ "Name", ppr n, "at position", ppr sp
                      , "doesn't occur in calculated scope", ppr scopes]
           | otherwise = []
-
-
-
-

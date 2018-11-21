@@ -1,6 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE FlexibleInstances #-}
-module HieBin where
+module HieBin ( readHieFile, writeHieFile, HieName(..), toHieName ) where
 
 import GhcPrelude
 import Data.IORef
@@ -22,13 +21,11 @@ import NameCache
 import FastString
 import UniqSupply
 import BinIface (getDictFastString)
-import qualified Data.Map as M
-import qualified Data.Set as S
 import qualified Data.Array as A
 
-import HieTypes
+import HieTypes ()
 
--- | `Name`'s get converted into `HieName`'s before being written into HIE
+-- | `Name`'s get converted into `HieName`'s before being written into @.hie@
 -- files. See 'toHieName' and 'fromHieName' for logic on how to convert between
 -- these two types.
 data HieName
@@ -270,4 +267,3 @@ getHieName bh = do
       (c,i) <- get bh
       return $ KnownKeyName $ mkUnique c i
     _ -> panic "HieBin.getHieName: invalid tag"
-

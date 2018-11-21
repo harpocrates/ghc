@@ -83,6 +83,7 @@ modifyState = foldr go id
 
 type HieM = ReaderT HieState Hsc
 
+-- | Construct an 'HieFile' from the outputs of the typechecker.
 mkHieFile :: ModSummary -> TypecheckedSource -> RenamedSource
   -> Hsc HieFile
 mkHieFile ms ts rs = do
@@ -103,6 +104,14 @@ getCompressedAsts :: TypecheckedSource -> RenamedSource
 getCompressedAsts ts rs = do
   asts <- enrichHie ts rs
   return $ compressTypes $ coerce asts
+
+newtype CmpType = CmpType Type
+
+instance Eq CmpType where
+  CmpType t1 == CmpType t2 = t1 `eqType` t2
+
+instance Ord CmpType where
+  compare (CmpType t1) (CmpType t2) = nonDetCmpType t1 t2
 
 enrichHie :: TypecheckedSource -> RenamedSource -> Hsc (HieASTs CmpType)
 enrichHie ts (hsGrp, imports, exports, _) = flip runReaderT initState $ do

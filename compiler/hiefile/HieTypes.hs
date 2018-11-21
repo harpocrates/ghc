@@ -1,4 +1,3 @@
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -23,13 +22,69 @@ import GHC.Show
 import SrcLoc
 import GhcPrelude
 import Name
-import Type
 import Module (ModuleName)
 import Control.Applicative ((<|>))
 import IfaceType
-import Data.Coerce
 
 type Span = RealSrcSpan
+
+-- | Current version of @.hie@ files
+curHieVersion :: Word8
+curHieVersion = 0
+
+{- |
+GHC builds up a wealth of information about Haskell source as it compiles it.
+@.hie@ files are a way of persisting some of this information to disk so that
+external tools that need to work with haskell source don't need to parse,
+typecheck, and rename all over again. These files contain:
+
+  * a simplified AST
+       - nodes are annotated with source positions and types
+       - identifiers are annotated with scope information
+
+  * the raw bytes of the initial Haskell source
+
+Besides saving compilation cycles, @.hie@ files also offer a more stable
+interface than the GHC API.
+-}
+data HieFile = HieFile
+    { hieVersion :: Word8
+
+    , ghcVersion :: ByteString
+    -- ^ Version of GHC that produced this file
+
+    , hsFile     :: FilePath
+    -- ^ Initial Haskell source file path
+
+    , hieTypes   :: Array TypeIndex HieTypeFlat
+    -- ^ Types referenced in the 'hieAST'.
+    --
+    -- See Note [Efficient serialization of redundant type info]
+
+    , hieAST     :: HieASTs TypeIndex
+    -- ^ Type-annotated abstract syntax trees
+
+    , hsSrc      :: ByteString
+    -- ^ Raw bytes of the initial Haskell source
+    }
+
+instance Binary HieFile where
+  put_ bh hf = do
+    put_ bh $ hieVersion hf
+    put_ bh $ ghcVersion hf
+    put_ bh $ hsFile hf
+    put_ bh $ hieTypes hf
+    put_ bh $ hieAST hf
+    put_ bh $ hsSrc hf
+
+  get bh = HieFile
+    <$> get bh
+    <*> get bh
+    <*> get bh
+    <*> get bh
+    <*> get bh
+    <*> get bh
+
 
 {-
 Note [Efficient serialization of redundant type info]
@@ -136,76 +191,13 @@ instance Binary (HieArgs TypeIndex) where
   get bh = HieArgs <$> get bh
 
 
-
-
-data Scope
-  = NoScope
-  | LocalScope Span
-  | ModuleScope
-    deriving (Eq, Ord, Show)
-
-instance Outputable Scope where
-  ppr NoScope = text "NoScope"
-  ppr (LocalScope sp) = text "LocalScope" <+> ppr sp
-  ppr ModuleScope = text "ModuleScope"
-
-instance Binary Scope where
-  put_ bh NoScope = putByte bh 0
-  put_ bh (LocalScope span) = do
-    putByte bh 1
-    put_ bh span
-  put_ bh ModuleScope = putByte bh 2
-
-  get bh = do
-    (t :: Word8) <- get bh
-    case t of
-      0 -> return NoScope
-      1 -> LocalScope <$> get bh
-      2 -> return ModuleScope
-      _ -> panic "Binary Scope: invalid tag"
-
-
-data TyVarScope
-  = ResolvedScopes [Scope]
-  | UnresolvedScope [Name] (Maybe Span)
-    -- ^ The Span is the location of the instance/class declaration
-    deriving (Eq, Ord)
-
-instance Show TyVarScope where
-  show (ResolvedScopes sc) = show sc
-  show _ = error "UnresolvedScope"
-
-instance Binary TyVarScope where
-  put_ bh (ResolvedScopes xs) = do
-    putByte bh 0
-    put_ bh xs
-  put_ bh (UnresolvedScope ns span) = do
-    putByte bh 1
-    put_ bh ns
-    put_ bh span
-
-  get bh = do
-    (t :: Word8) <- get bh
-    case t of
-      0 -> ResolvedScopes <$> get bh
-      1 -> UnresolvedScope <$> get bh <*> get bh
-      _ -> panic "Binary TyVarScope: invalid tag"
-
-
-curHieVersion :: Word8
-curHieVersion = 0
-
-data HieFile = HieFile
-    { hieVersion :: Word8
-    , ghcVersion :: ByteString
-    , hsFile     :: FilePath
-    , hieTypes   :: Array TypeIndex HieTypeFlat
-    , hieAST     :: HieASTs TypeIndex
-    , hsSrc      :: ByteString
-    }
-
 newtype HieASTs a = HieASTs { getAsts :: (Map FastString (HieAST a)) }
   deriving (Functor, Foldable, Traversable)
+
+instance Binary (HieASTs TypeIndex) where
+  put_ bh asts = put_ bh $ M.toAscList $ getAsts asts
+  get bh = HieASTs <$> fmap M.fromAscList (get bh)
+
 
 data HieAST a =
   Node
@@ -214,37 +206,125 @@ data HieAST a =
     , nodeChildren :: [HieAST a]
     } deriving (Functor, Foldable, Traversable)
 
+instance Binary (HieAST TypeIndex) where
+  put_ bh ast = do
+    put_ bh $ nodeInfo ast
+    put_ bh $ nodeSpan ast
+    put_ bh $ nodeChildren ast
+
+  get bh = Node
+    <$> get bh
+    <*> get bh
+    <*> get bh
+
+
 data NodeInfo a = NodeInfo
-    { nodeAnnotations :: Set (FastString,FastString) -- Constr, Type
-    , nodeType :: [a] -- The haskell type of this node, if any
-    , nodeIdentifiers :: NodeIdentifiers a -- All the identifiers and their details
+    { nodeAnnotations :: Set (FastString,FastString)
+    -- ^ (Constr, Type)
+
+    , nodeType :: [a]
+    -- ^ The Haskell type of this node, if any
+
+    , nodeIdentifiers :: NodeIdentifiers a
+    -- ^ All the identifiers and their details
     } deriving (Functor, Foldable, Traversable)
+
+instance Ord a => Semigroup (NodeInfo a) where
+  (NodeInfo as ai ad) <> (NodeInfo bs bi bd) =
+    NodeInfo (S.union as bs) (snub ai bi) (M.unionWith (<>) ad bd)
+    where
+      snub :: Ord a => [a] -> [a] -> [a]
+      snub as bs = S.toAscList $ S.union (S.fromAscList as) (S.fromAscList bs)
+
+instance Ord a => Monoid (NodeInfo a) where
+  mempty = NodeInfo S.empty [] M.empty
+
+instance Binary (NodeInfo TypeIndex) where
+  put_ bh ni = do
+    put_ bh $ S.toAscList $ nodeAnnotations ni
+    put_ bh $ nodeType ni
+    put_ bh $ M.toList $ nodeIdentifiers ni
+  get bh = NodeInfo
+    <$> fmap (S.fromAscList) (get bh)
+    <*> get bh
+    <*> fmap (M.fromList) (get bh)
+
+
 
 type Identifier = Either ModuleName Name
 
 type NodeIdentifiers a = Map Identifier (IdentifierDetails a)
 
+-- | Information associated with every identifier
+--
+-- We need to include types with identifiers because sometimes multiple
+-- identifiers occur in the same span(Overloaded Record Fields and so on)
 data IdentifierDetails a = IdentifierDetails
   { identType :: Maybe a
   , identInfo :: Set ContextInfo
   } deriving (Eq, Functor, Foldable, Traversable)
--- ^ We need to include types with identifiers because sometimes multiple
--- identifiers occur in the same span(Overloaded Record Fields and so on)
 
 instance Outputable a => Outputable (IdentifierDetails a) where
   ppr x = text "IdentifierDetails" <+> ppr (identType x) <+> ppr (identInfo x)
 
+instance Semigroup (IdentifierDetails a) where
+  d1 <> d2 =
+    IdentifierDetails (identType d1 <|> identType d2) (S.union (identInfo d1) (identInfo d2))
+
+instance Monoid (IdentifierDetails a) where
+  mempty = IdentifierDetails Nothing S.empty
+
+instance Binary (IdentifierDetails TypeIndex) where
+  put_ bh dets = do
+    put_ bh $ identType dets
+    put_ bh $ S.toAscList $ identInfo dets
+  get bh =  IdentifierDetails
+    <$> get bh
+    <*> fmap (S.fromAscList) (get bh)
+
+
 -- | Different contexts under which identifiers exist
 data ContextInfo
-  = Use
+  = Use                -- ^ regular variable
   | MatchBind
-  | IEThing IEType
+  | IEThing IEType     -- ^ import/export
   | TyDecl
-  | ValBind BindType Scope (Maybe Span) -- Span of entire binding
-  | PatternBind Scope Scope (Maybe Span) -- Span of entire binding
+
+  -- | Value binding
+  | ValBind
+      BindType     -- ^ whether or not the binding is in an instance
+      Scope        -- ^ scope over which the value is bound
+      (Maybe Span) -- ^ span of entire binding
+
+  -- | Pattern binding
+  --
+  -- This case is tricky because the bound identifier can be used in two
+  -- distinct scopes. Consider the following example (with @-XViewPatterns@)
+  --
+  -- @
+  -- do (b, a, (a -> True)) <- bar
+  --    foo a
+  -- @
+  --
+  -- The identifier @a@ has two scopes: in the view pattern @(a -> True)@ and
+  -- in the rest of the @do@-block in @foo a@.
+  | PatternBind
+      Scope        -- ^ scope /in the pattern/ (the variable bound can be used
+                   -- further in the pattern)
+      Scope        -- ^ rest of the scope outside the pattern
+      (Maybe Span) -- ^ span of entire binding
+
   | ClassTyDecl (Maybe Span)
-  | Decl DeclType (Maybe Span) -- Span of entire binding
+
+  -- | Declaration
+  | Decl
+      DeclType     -- ^ type of declaration
+      (Maybe Span) -- ^ span of entire binding
+
+  -- | Type variable
   | TyVarBind Scope TyVarScope
+
+  -- | Record field
   | RecField RecFieldContext (Maybe Span)
     deriving (Eq, Ord, Show)
 
@@ -299,17 +379,19 @@ instance Binary ContextInfo where
       9 -> return MatchBind
       _ -> panic "Binary ContextInfo: invalid tag"
 
--- | Different import-statement forms
+
+-- | Types of imports and exports
 data IEType
-  = Import        -- ^ @import Foo@
-  | ImportAs      -- ^ @import qualified Foo as S@
-  | ImportHiding  -- ^ @import Foo hiding (..)@
-  | Export        -- ^ name in an export list
+  = Import
+  | ImportAs
+  | ImportHiding
+  | Export
     deriving (Eq, Enum, Ord, Show)
 
 instance Binary IEType where
-  put_ = putEnum
-  get = getEnum
+  put_ bh b = putByte bh (fromIntegral (fromEnum b))
+  get bh = do x <- getByte bh; pure $! (toEnum (fromIntegral x))
+
 
 data RecFieldContext
   = RecFieldDecl
@@ -319,8 +401,9 @@ data RecFieldContext
     deriving (Eq, Enum, Ord, Show)
 
 instance Binary RecFieldContext where
-  put_ = putEnum
-  get = getEnum
+  put_ bh b = putByte bh (fromIntegral (fromEnum b))
+  get bh = do x <- getByte bh; pure $! (toEnum (fromIntegral x))
+
 
 data BindType
   = RegularBind
@@ -328,101 +411,95 @@ data BindType
     deriving (Eq, Ord, Show, Enum)
 
 instance Binary BindType where
-  put_ = putEnum
-  get = getEnum
+  put_ bh b = putByte bh (fromIntegral (fromEnum b))
+  get bh = do x <- getByte bh; pure $! (toEnum (fromIntegral x))
+
 
 data DeclType
   = FamDec     -- ^ type or data family
   | SynDec     -- ^ type synonym
   | DataDec    -- ^ data declaration
-  | ConDec     -- ^ constructor declaration ???
+  | ConDec     -- ^ constructor declaration
   | PatSynDec  -- ^ pattern synonym
   | ClassDec   -- ^ class declaration
   | InstDec    -- ^ instance declaration
     deriving (Eq, Ord, Show, Enum)
 
 instance Binary DeclType where
-  put_ = putEnum
-  get = getEnum
-
-instance Ord a => Semigroup (NodeInfo a) where
-  (NodeInfo as ai ad) <> (NodeInfo bs bi bd) =
-    NodeInfo (S.union as bs) (snub ai bi) (combineNodeIdentifiers ad bd)
-instance Ord a => Monoid (NodeInfo a) where
-  mempty = NodeInfo S.empty [] M.empty
-
-instance Semigroup (IdentifierDetails a) where
-  d1 <> d2 =
-    IdentifierDetails (identType d1 <|> identType d2) (S.union (identInfo d1) (identInfo d2))
-instance Monoid (IdentifierDetails a) where
-  mempty = IdentifierDetails Nothing S.empty
-
-snub :: Ord a => [a] -> [a] -> [a]
-snub as bs = S.toAscList $ S.union (S.fromAscList as) (S.fromAscList bs)
-
-combineNodeIdentifiers :: NodeIdentifiers a -> NodeIdentifiers a -> NodeIdentifiers a
-combineNodeIdentifiers i1 i2 = M.unionWith (<>) i1 i2
-
-newtype CmpType = CmpType Type
-
-instance Eq CmpType where (==) = coerce eqType
-instance Ord CmpType where compare = coerce nonDetCmpType
+  put_ bh b = putByte bh (fromIntegral (fromEnum b))
+  get bh = do x <- getByte bh; pure $! (toEnum (fromIntegral x))
 
 
-putEnum :: Enum a => BinHandle -> a -> IO ()
-putEnum bh = putByte bh . fromIntegral . fromEnum
+data Scope
+  = NoScope
+  | LocalScope Span
+  | ModuleScope
+    deriving (Eq, Ord, Show)
 
-getEnum :: Enum a => BinHandle -> IO a
-getEnum bh = toEnum . fromIntegral <$> getByte bh
+instance Outputable Scope where
+  ppr NoScope = text "NoScope"
+  ppr (LocalScope sp) = text "LocalScope" <+> ppr sp
+  ppr ModuleScope = text "ModuleScope"
 
-instance Binary (IdentifierDetails TypeIndex) where
-  put_ bh dets = do
-    put_ bh $ identType dets
-    put_ bh $ S.toAscList $ identInfo dets
-  get bh =  IdentifierDetails
-    <$> get bh
-    <*> fmap (S.fromAscList) (get bh)
+instance Binary Scope where
+  put_ bh NoScope = putByte bh 0
+  put_ bh (LocalScope span) = do
+    putByte bh 1
+    put_ bh span
+  put_ bh ModuleScope = putByte bh 2
 
-instance Binary (NodeInfo TypeIndex) where
-  put_ bh ni = do
-    put_ bh $ S.toAscList $ nodeAnnotations ni
-    put_ bh $ nodeType ni
-    put_ bh $ M.toList $ nodeIdentifiers ni
-  get bh = NodeInfo
-    <$> fmap (S.fromAscList) (get bh)
-    <*> get bh
-    <*> fmap (M.fromList) (get bh)
+  get bh = do
+    (t :: Word8) <- get bh
+    case t of
+      0 -> return NoScope
+      1 -> LocalScope <$> get bh
+      2 -> return ModuleScope
+      _ -> panic "Binary Scope: invalid tag"
 
-instance Binary (HieAST TypeIndex) where
-  put_ bh ast = do
-    put_ bh $ nodeInfo ast
-    put_ bh $ nodeSpan ast
-    put_ bh $ nodeChildren ast
 
-  get bh = Node
-    <$> get bh
-    <*> get bh
-    <*> get bh
+-- | Scope of a type variable.
+--
+-- This warrants a data type apart from 'Scope' because of complexities
+-- introduced by features like @-XScopedTypeVariables@ and @-XInstanceSigs@. For
+-- example, consider:
+--
+-- @
+-- foo, bar, baz :: forall a. a -> a
+-- @
+--
+-- Here @a@ is in scope in all the definitions of @foo@, @bar@, and @baz@, so we
+-- need a list of scopes to keep track of this. Furthermore, this list cannot be
+-- computed until we resolve the binding sites of @foo@, @bar@, and @baz@.
+--
+-- Consequently, @a@ starts with an @'UnresolvedScope' [foo, bar, baz] Nothing@
+-- which later gets resolved into a 'ResolvedScopes'.
+data TyVarScope
+  = ResolvedScopes [Scope]
 
-instance Binary (HieASTs TypeIndex) where
-  put_ bh asts =
-    put_ bh $ M.toAscList $ getAsts asts
-  get bh =
-    HieASTs <$> fmap M.fromAscList (get bh)
+  -- | Unresolved scopes should never show up in the final @.hie@ file
+  | UnresolvedScope
+        [Name]        -- ^ names of the definitions over which the scope spans
+        (Maybe Span)  -- ^ the location of the instance/class declaration for
+                      -- the case where the type variable is declared in a
+                      -- method type signature
+    deriving (Eq, Ord)
 
-instance Binary HieFile where
-  put_ bh hf = do
-    put_ bh $ hieVersion hf
-    put_ bh $ ghcVersion hf
-    put_ bh $ hsFile hf
-    put_ bh $ hieTypes hf
-    put_ bh $ hieAST hf
-    put_ bh $ hsSrc hf
+instance Show TyVarScope where
+  show (ResolvedScopes sc) = show sc
+  show _ = error "UnresolvedScope"
 
-  get bh = HieFile
-    <$> get bh
-    <*> get bh
-    <*> get bh
-    <*> get bh
-    <*> get bh
-    <*> get bh
+instance Binary TyVarScope where
+  put_ bh (ResolvedScopes xs) = do
+    putByte bh 0
+    put_ bh xs
+  put_ bh (UnresolvedScope ns span) = do
+    putByte bh 1
+    put_ bh ns
+    put_ bh span
+
+  get bh = do
+    (t :: Word8) <- get bh
+    case t of
+      0 -> ResolvedScopes <$> get bh
+      1 -> UnresolvedScope <$> get bh <*> get bh
+      _ -> panic "Binary TyVarScope: invalid tag"
