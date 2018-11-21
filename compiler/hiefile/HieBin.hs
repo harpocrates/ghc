@@ -28,6 +28,9 @@ import qualified Data.Array as A
 
 import HieTypes
 
+-- | `Name`'s get converted into `HieName`'s before being written into HIE
+-- files. See 'toHieName' and 'fromHieName' for logic on how to convert between
+-- these two types.
 data HieName
   = ExternalName !Module !OccName !SrcSpan
   | LocalName !OccName !SrcSpan
@@ -43,6 +46,12 @@ instance Ord HieName where
   compare LocalName{} ExternalName{} = GT
   compare LocalName{} _ = LT
   compare KnownKeyName{} _ = GT
+
+instance Outputable HieName where
+  ppr (ExternalName m n sp) = text "ExternalName" <+> ppr m <+> ppr n <+> ppr sp
+  ppr (LocalName n sp) = text "LocalName" <+> ppr n <+> ppr sp
+  ppr (KnownKeyName u) = text "KnownKeyName" <+> ppr u
+
 
 data HieSymbolTable = HieSymbolTable
   { hie_symtab_next :: !FastMutInt
@@ -167,7 +176,7 @@ putSymbolTable :: BinHandle -> Int -> UniqFM (Int,HieName) -> IO ()
 putSymbolTable bh next_off symtab = do
   put_ bh next_off
   let names = A.elems (A.array (0,next_off-1) (nonDetEltsUFM symtab))
-  mapM_ (serializeHieName bh) names
+  mapM_ (putHieName bh) names
 
 getSymbolTable :: BinHandle -> NameCache -> IO (NameCache, SymbolTable)
 getSymbolTable bh namecache = do
@@ -201,9 +210,13 @@ putName (HieSymbolTable next ref) bh name = do
         writeIORef ref $! addToUFM symmap name (off, toHieName name)
         put_ bh (fromIntegral off :: Word32)
 
-notLocal :: HieName -> Bool
-notLocal LocalName{} = False
-notLocal _ = True
+  where
+    notLocal :: HieName -> Bool
+    notLocal LocalName{} = False
+    notLocal _ = True
+
+
+-- ** Converting to and from `HieName`'s
 
 toHieName :: Name -> HieName
 toHieName name
@@ -230,14 +243,16 @@ fromHieName nc (KnownKeyName u) = case lookupKnownKeyName u of
                         (ppr (unpkUnique u))
     Just n -> (nc, n)
 
-serializeHieName :: BinHandle -> HieName -> IO ()
-serializeHieName bh (ExternalName mod occ span) = do
+-- ** Reading and writing `HieName`'s
+
+putHieName :: BinHandle -> HieName -> IO ()
+putHieName bh (ExternalName mod occ span) = do
   putByte bh 0
   put_ bh (mod, occ, span)
-serializeHieName bh (LocalName occName span) = do
+putHieName bh (LocalName occName span) = do
   putByte bh 1
   put_ bh (occName, span)
-serializeHieName bh (KnownKeyName uniq) = do
+putHieName bh (KnownKeyName uniq) = do
   putByte bh 2
   put_ bh $ unpkUnique uniq
 
@@ -256,222 +271,3 @@ getHieName bh = do
       return $ KnownKeyName $ mkUnique c i
     _ -> panic "HieBin.getHieName: invalid tag"
 
-putEnum :: Enum a => BinHandle -> a -> IO ()
-putEnum bh = putByte bh . fromIntegral . fromEnum
-
-getEnum :: Enum a => BinHandle -> IO a
-getEnum bh = toEnum . fromIntegral <$> getByte bh
-
-instance Binary (HieArgs Int) where
-  put_ bh (HieArgs xs) = put_ bh xs
-  get bh = HieArgs <$> get bh
-
-instance Binary (HieType Int) where
-  put_ bh (HTyVarTy n) = do
-    putByte bh 0
-    put_ bh n
-  put_ bh (HAppTy a b) = do
-    putByte bh 1
-    put_ bh a
-    put_ bh b
-  put_ bh (HTyConApp n xs) = do
-    putByte bh 2
-    put_ bh n
-    put_ bh xs
-  put_ bh (HForAllTy bndr a) = do
-    putByte bh 3
-    put_ bh bndr
-    put_ bh a
-  put_ bh (HFunTy k a b) = do
-    putByte bh 4
-    put_ bh k
-    put_ bh a
-    put_ bh b
-  put_ bh (HLitTy l) = do
-    putByte bh 5
-    put_ bh l
-  put_ bh (HCastTy a) = do
-    putByte bh 6
-    put_ bh a
-  put_ bh (HCoercionTy) = putByte bh 7
-
-  get bh = do
-    (t :: Word8) <- get bh
-    case t of
-      0 -> HTyVarTy <$> get bh
-      1 -> HAppTy <$> get bh <*> get bh
-      2 -> HTyConApp <$> get bh <*> get bh
-      3 -> HForAllTy <$> get bh <*> get bh
-      4 -> HFunTy <$> get bh <*> get bh <*> get bh
-      5 -> HLitTy <$> get bh
-      6 -> HCastTy <$> get bh
-      7 -> return HCoercionTy
-      _ -> panic "Binary (HieArgs Int): invalid tag"
-
-instance Binary BindType where
-  put_ = putEnum
-  get = getEnum
-
-instance Binary RecFieldContext where
-  put_ = putEnum
-  get = getEnum
-
-instance Binary DeclType where
-  put_ = putEnum
-  get = getEnum
-
-instance Binary IEType where
-  put_ = putEnum
-  get = getEnum
-
-instance Binary Scope where
-  put_ bh NoScope = putByte bh 0
-  put_ bh (LocalScope span) = do
-    putByte bh 1
-    put_ bh span
-  put_ bh ModuleScope = putByte bh 2
-
-  get bh = do
-    (t :: Word8) <- get bh
-    case t of
-      0 -> return NoScope
-      1 -> LocalScope <$> get bh
-      2 -> return ModuleScope
-      _ -> panic "Binary Scope: invalid tag"
-
-instance Binary TyVarScope where
-  put_ bh (ResolvedScopes xs) = do
-    putByte bh 0
-    put_ bh xs
-  put_ bh (UnresolvedScope ns span) = do
-    putByte bh 1
-    put_ bh ns
-    put_ bh span
-
-  get bh = do
-    (t :: Word8) <- get bh
-    case t of
-      0 -> ResolvedScopes <$> get bh
-      1 -> UnresolvedScope <$> get bh <*> get bh
-      _ -> panic "Binary TyVarScope: invalid tag"
-
-instance Binary ContextInfo where
-  put_ bh Use = putByte bh 0
-  put_ bh (IEThing t) = do
-    putByte bh 1
-    put_ bh t
-  put_ bh TyDecl = putByte bh 2
-  put_ bh (ValBind bt sc msp) = do
-    putByte bh 3
-    put_ bh bt
-    put_ bh sc
-    put_ bh msp
-  put_ bh (PatternBind a b c) = do
-    putByte bh 4
-    put_ bh a
-    put_ bh b
-    put_ bh c
-  put_ bh (ClassTyDecl sp) = do
-    putByte bh 5
-    put_ bh sp
-  put_ bh (Decl a b) = do
-    putByte bh 6
-    put_ bh a
-    put_ bh b
-  put_ bh (TyVarBind a b) = do
-    putByte bh 7
-    put_ bh a
-    put_ bh b
-  put_ bh (RecField a b) = do
-    putByte bh 8
-    put_ bh a
-    put_ bh b
-  put_ bh MatchBind = putByte bh 9
-
-  get bh = do
-    (t :: Word8) <- get bh
-    case t of
-      0 -> return Use
-      1 -> IEThing <$> get bh
-      2 -> return TyDecl
-      3 -> ValBind <$> get bh <*> get bh <*> get bh
-      4 -> PatternBind <$> get bh <*> get bh <*> get bh
-      5 -> ClassTyDecl <$> get bh
-      6 -> Decl <$> get bh <*> get bh
-      7 -> TyVarBind <$> get bh <*> get bh
-      8 -> RecField <$> get bh <*> get bh
-      9 -> return MatchBind
-      _ -> panic "Binary ContextInfo: invalid tag"
-
-instance Binary (IdentifierDetails Int) where
-  put_ bh dets = do
-    put_ bh $ identType dets
-    put_ bh $ S.toAscList $ identInfo dets
-  get bh =  IdentifierDetails
-    <$> get bh
-    <*> fmap (S.fromAscList) (get bh)
-
-instance Binary (NodeInfo Int) where
-  put_ bh ni = do
-    put_ bh $ S.toAscList $ nodeAnnotations ni
-    put_ bh $ nodeType ni
-    put_ bh $ M.toList $ nodeIdentifiers ni
-  get bh = NodeInfo
-    <$> fmap (S.fromAscList) (get bh)
-    <*> get bh
-    <*> fmap (M.fromList) (get bh)
-
-instance Binary RealSrcSpan where
-  put_ bh ss = do
-    put_ bh (srcSpanFile ss)
-    put_ bh (srcSpanStartLine ss)
-    put_ bh (srcSpanStartCol ss)
-    put_ bh (srcSpanEndLine ss)
-    put_ bh (srcSpanEndCol ss)
-  get bh = do
-    f <- get bh
-    [sl,sc,el,ec] <- replicateM 4 $ get bh
-    return $ mkRealSrcSpan (mkRealSrcLoc f sl sc) (mkRealSrcLoc f el ec)
-
-instance Binary (HieAST Int) where
-  put_ bh ast = do
-    put_ bh $ nodeInfo ast
-    put_ bh $ nodeSpan ast
-    put_ bh $ nodeChildren ast
-
-  get bh = Node
-    <$> get bh
-    <*> get bh
-    <*> get bh
-
-instance Binary a => Binary (A.Array TypeIndex a) where
-  put_ bh arr = do
-    put_ bh $ A.bounds arr
-    put_ bh $ A.elems arr
-  get bh = do
-    bounds <- get bh
-    xs <- get bh
-    return $ A.listArray bounds xs
-
-instance Binary (HieASTs Int) where
-  put_ bh asts =
-    put_ bh $ M.toAscList $ getAsts asts
-  get bh =
-    HieASTs <$> fmap M.fromAscList (get bh)
-
-instance Binary HieFile where
-  put_ bh hf = do
-    put_ bh $ hieVersion hf
-    put_ bh $ ghcVersion hf
-    put_ bh $ hsFile hf
-    put_ bh $ hieTypes hf
-    put_ bh $ hieAST hf
-    put_ bh $ hsSrc hf
-
-  get bh = HieFile
-    <$> get bh
-    <*> get bh
-    <*> get bh
-    <*> get bh
-    <*> get bh
-    <*> get bh

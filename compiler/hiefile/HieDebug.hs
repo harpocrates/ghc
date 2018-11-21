@@ -138,18 +138,6 @@ validateScopes asts = M.foldrWithKey (\k a b -> valid k a ++ b) [] refMap
                      , "doesn't occur in calculated scope", ppr scopes]
           | otherwise = []
 
-instance Outputable a => Outputable (IdentifierDetails a) where
-  ppr x = text "IdentifierDetails" <+> ppr (identType x) <+> ppr (identInfo x)
 
-instance Outputable HieName where
-  ppr (ExternalName m n sp) = text "ExternalName" <+> ppr m <+> ppr n <+> ppr sp
-  ppr (LocalName n sp) = text "LocalName" <+> ppr n <+> ppr sp
-  ppr (KnownKeyName u) = text "KnownKeyName" <+> ppr u
 
-instance Outputable Scope where
-  ppr NoScope = text "NoScope"
-  ppr (LocalScope sp) = text "LocalScope" <+> ppr sp
-  ppr ModuleScope = text "ModuleScope"
 
-instance Outputable ContextInfo where
-  ppr = text . show
