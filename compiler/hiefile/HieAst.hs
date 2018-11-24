@@ -463,7 +463,7 @@ instance ( ToHie (LMatch a body)
          ) => ToHie (MatchGroup a body) where
   toHie mg = concatM $ case mg of
     MG{ mg_alts = (L span alts) , mg_origin = FromSource } ->
-      [ pure $ locOnly span -- causes crash in compiler/prelude/PrimOp.hs
+      [ pure $ locOnly span
       , toHie alts
       ]
     MG{} -> []

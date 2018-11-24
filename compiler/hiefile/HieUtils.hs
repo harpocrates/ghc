@@ -284,16 +284,31 @@ combineAst a (Node xs span children) = Node xs span (insertAst a children)
 insertAst :: Ord a => HieAST a -> [HieAST a] -> [HieAST a]
 insertAst x = mergeAsts [x]
 
--- Merge two sorted, disjoint lists of ASTs, combining when necessary
+-- | Merge two sorted, disjoint lists of ASTs, combining when necessary.
+--
+-- In the absence of position-altering pragmas (ex: @# line "file.hs" 3@),
+-- different nodes in an AST tree should either have disjoint spans (in
+-- which case you can say for sure which one comes first) or one span
+-- should be completely contained in the other (in which case the contained
+-- span corresponds to some child node).
+--
+-- However, since Haskell does have position-altering pragmas it /is/
+-- possible for spans to be overlapping. In this case, we just do our best
+-- to produce sensible `HieAST`'s...
 mergeAsts :: Ord a => [HieAST a] -> [HieAST a] -> [HieAST a]
 mergeAsts xs [] = xs
 mergeAsts [] ys = ys
 mergeAsts xs@(a:as) ys@(b:bs)
-  | nodeSpan a `containsSpan` nodeSpan b = mergeAsts (combineAst a b : as) bs
-  | nodeSpan b `containsSpan` nodeSpan a = mergeAsts as (combineAst a b : bs)
-  | nodeSpan a `rightOf` nodeSpan b = b : mergeAsts xs bs
-  | nodeSpan a `leftOf`  nodeSpan b = a : mergeAsts as ys
-  | otherwise = error $ "mergeAsts: Spans overlapping"
+  | span_a `containsSpan`   span_b = mergeAsts (combineAst a b : as) bs
+  | span_b `containsSpan`   span_a = mergeAsts as (combineAst a b : bs)
+  | span_a `rightOf`        span_b = b : mergeAsts xs bs
+  | span_a `leftOf`         span_b = a : mergeAsts as ys
+  | span_a `leftOf`         span_b = a : mergeAsts as ys
+  | span_a `startsRightOf`  span_b = b : mergeAsts as ys
+  | otherwise                      = a : mergeAsts as ys
+  where
+    span_a = nodeSpan a
+    span_b = nodeSpan a
 
 rightOf :: Span -> Span -> Bool
 rightOf s1 s2
@@ -306,6 +321,11 @@ leftOf s1 s2
   = (srcSpanEndLine s1, srcSpanEndCol s1)
        <= (srcSpanStartLine s2, srcSpanStartCol s2)
     && (srcSpanFile s1 == srcSpanFile s2)
+
+startsRightOf :: Span -> Span -> Bool
+startsRightOf s1 s2
+  = (srcSpanStartLine s1, srcSpanStartCol s1)
+       >= (srcSpanStartLine s2, srcSpanStartCol s2)
 
 -- | combines and sorts ASTs using a merge sort
 mergeSortAsts :: Ord a => [HieAST a] -> [HieAST a]
