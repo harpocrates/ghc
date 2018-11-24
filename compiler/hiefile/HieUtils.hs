@@ -321,14 +321,13 @@ mergeAsts xs@(a:as) ys@(b:bs)
   | span_b `containsSpan`   span_a = mergeAsts as (combineAst a b : bs)
   | span_a `rightOf`        span_b = b : mergeAsts xs bs
   | span_a `leftOf`         span_b = a : mergeAsts as ys
-  | span_a `leftOf`         span_b = a : mergeAsts as ys
 
   -- These cases are to work around ASTs that are not fully disjoint
   | span_a `startsRightOf`  span_b = b : mergeAsts as ys
   | otherwise                      = a : mergeAsts as ys
   where
     span_a = nodeSpan a
-    span_b = nodeSpan a
+    span_b = nodeSpan b
 
 rightOf :: Span -> Span -> Bool
 rightOf s1 s2
