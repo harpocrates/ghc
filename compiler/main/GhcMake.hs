@@ -2186,6 +2186,7 @@ summariseFile hsc_env old_summaries file mb_phase obj_allowed maybe_buf
                         then liftIO $ getObjTimestamp location NotBoot
                         else return Nothing
                   hi_timestamp <- maybeGetIfaceDate dflags location
+                  hie_timestamp <- modificationTimeIfExists (ml_hie_file location)
 
                   -- We have to repopulate the Finder's cache because it
                   -- was flushed before the downsweep.
@@ -2193,7 +2194,8 @@ summariseFile hsc_env old_summaries file mb_phase obj_allowed maybe_buf
                     (moduleName (ms_mod old_summary)) (ms_location old_summary)
 
                   return old_summary{ ms_obj_date = obj_timestamp
-                                    , ms_iface_date = hi_timestamp }
+                                    , ms_iface_date = hi_timestamp
+                                    , ms_hie_date = hie_timestamp }
            else
                 new_summary src_timestamp
 
@@ -2232,6 +2234,7 @@ summariseFile hsc_env old_summaries file mb_phase obj_allowed maybe_buf
                 else return Nothing
 
         hi_timestamp <- maybeGetIfaceDate dflags location
+        hie_timestamp <- modificationTimeIfExists (ml_hie_file location)
 
         extra_sig_imports <- findExtraSigImports hsc_env hsc_src mod_name
         required_by_imports <- implicitRequirements hsc_env the_imps
@@ -2247,6 +2250,7 @@ summariseFile hsc_env old_summaries file mb_phase obj_allowed maybe_buf
                              ms_textual_imps = the_imps ++ extra_sig_imports ++ required_by_imports,
                              ms_hs_date = src_timestamp,
                              ms_iface_date = hi_timestamp,
+                             ms_hie_date = hie_timestamp,
                              ms_obj_date = obj_timestamp })
 
 findSummaryBySourceFile :: [ModSummary] -> FilePath -> Maybe ModSummary
@@ -2304,8 +2308,10 @@ summariseModule hsc_env old_summary_map is_boot (L loc wanted_mod)
                        then getObjTimestamp location is_boot
                        else return Nothing
                 hi_timestamp <- maybeGetIfaceDate dflags location
+                hie_timestamp <- modificationTimeIfExists (ml_hie_file location)
                 return (Just (Right old_summary{ ms_obj_date = obj_timestamp
-                                               , ms_iface_date = hi_timestamp}))
+                                               , ms_iface_date = hi_timestamp
+                                               , ms_hie_date = hie_timestamp }))
         | otherwise =
                 -- source changed: re-summarise.
                 new_summary location (ms_mod old_summary) src_fn src_timestamp
@@ -2389,6 +2395,7 @@ summariseModule hsc_env old_summary_map is_boot (L loc wanted_mod)
               else return Nothing
 
         hi_timestamp <- maybeGetIfaceDate dflags location
+        hie_timestamp <- modificationTimeIfExists (ml_hie_file location)
 
         extra_sig_imports <- findExtraSigImports hsc_env hsc_src mod_name
         required_by_imports <- implicitRequirements hsc_env the_imps
@@ -2404,6 +2411,7 @@ summariseModule hsc_env old_summary_map is_boot (L loc wanted_mod)
                               ms_textual_imps = the_imps ++ extra_sig_imports ++ required_by_imports,
                               ms_hs_date   = src_timestamp,
                               ms_iface_date = hi_timestamp,
+                              ms_hie_date = hie_timestamp,
                               ms_obj_date  = obj_timestamp })))
 
 

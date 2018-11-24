@@ -398,7 +398,7 @@ hscParse' mod_summary
 
 -- -----------------------------------------------------------------------------
 -- | If the renamed source has been kept, extract it. Dump it if requested.
-extract_renamed_stuff :: ModSummary -> TcGblEnv -> Hsc (TcGblEnv, RenamedStuff)
+extract_renamed_stuff :: ModSummary -> TcGblEnv -> Hsc RenamedStuff
 extract_renamed_stuff mod_summary tc_result = do
     let rn_info = getRenamedStuff tc_result
 
@@ -427,7 +427,7 @@ extract_renamed_stuff mod_summary tc_result = do
                 xs -> do
                   putMsg dflags $ text "Got roundtrip errors"
                   mapM_ (putMsg dflags) xs
-    return (tc_result, rn_info)
+    return rn_info
 
 
 -- -----------------------------------------------------------------------------
@@ -435,22 +435,23 @@ extract_renamed_stuff mod_summary tc_result = do
 hscTypecheckRename :: HscEnv -> ModSummary -> HsParsedModule
                    -> IO (TcGblEnv, RenamedStuff)
 hscTypecheckRename hsc_env mod_summary rdr_module = runHsc hsc_env $ do
-      tc_result <- hscTypecheck True mod_summary (Just rdr_module)
-      extract_renamed_stuff mod_summary tc_result
+    tc_result <- hsc_typecheck True mod_summary (Just rdr_module)
+    rn_info <- extract_renamed_stuff mod_summary tc_result
+    return (tc_result, rn_info)
 
+-- | Rename and typecheck a module, but don't return the renamed syntax
 hscTypecheck :: Bool -- ^ Keep renamed source?
              -> ModSummary -> Maybe HsParsedModule
              -> Hsc TcGblEnv
 hscTypecheck keep_rn mod_summary mb_rdr_module = do
-    tc_result <- hscTypecheck' keep_rn mod_summary mb_rdr_module
+    tc_result <- hsc_typecheck keep_rn mod_summary mb_rdr_module
     _ <- extract_renamed_stuff mod_summary tc_result
     return tc_result
 
-
-hscTypecheck' :: Bool -- ^ Keep renamed source?
+hsc_typecheck :: Bool -- ^ Keep renamed source?
               -> ModSummary -> Maybe HsParsedModule
               -> Hsc TcGblEnv
-hscTypecheck' keep_rn mod_summary mb_rdr_module = do
+hsc_typecheck keep_rn mod_summary mb_rdr_module = do
     hsc_env <- getHscEnv
     let hsc_src = ms_hsc_src mod_summary
         dflags = hsc_dflags hsc_env
