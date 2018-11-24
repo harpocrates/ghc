@@ -284,17 +284,35 @@ combineAst a (Node xs span children) = Node xs span (insertAst a children)
 insertAst :: Ord a => HieAST a -> [HieAST a] -> [HieAST a]
 insertAst x = mergeAsts [x]
 
--- | Merge two sorted, disjoint lists of ASTs, combining when necessary.
---
--- In the absence of position-altering pragmas (ex: @# line "file.hs" 3@),
--- different nodes in an AST tree should either have disjoint spans (in
--- which case you can say for sure which one comes first) or one span
--- should be completely contained in the other (in which case the contained
--- span corresponds to some child node).
---
--- However, since Haskell does have position-altering pragmas it /is/
--- possible for spans to be overlapping. In this case, we just do our best
--- to produce sensible `HieAST`'s...
+{- | Merge two sorted, disjoint lists of ASTs, combining when necessary.
+
+In the absence of position-altering pragmas (ex: @# line "file.hs" 3@),
+different nodes in an AST tree should either have disjoint spans (in
+which case you can say for sure which one comes first) or one span
+should be completely contained in the other (in which case the contained
+span corresponds to some child node).
+
+However, since Haskell does have position-altering pragmas it /is/
+possible for spans to be overlapping. Here is an example of a source file
+in which @foozball@ and @quuuuuux@ have overlapping spans:
+
+@
+module Baz where
+
+# line 3 "Baz.hs"
+foozball :: Int
+foozball = 0
+
+# line 3 "Baz.hs"
+bar, quuuuuux :: Int
+bar = 1
+quuuuuux = 2
+@
+
+In these cases, we just do our best to produce sensible `HieAST`'s. The blame
+should be laid at the feet of whoever wrote the line pragmas in the first place
+(usually the C preprocessor...).
+-}
 mergeAsts :: Ord a => [HieAST a] -> [HieAST a] -> [HieAST a]
 mergeAsts xs [] = xs
 mergeAsts [] ys = ys
@@ -304,6 +322,8 @@ mergeAsts xs@(a:as) ys@(b:bs)
   | span_a `rightOf`        span_b = b : mergeAsts xs bs
   | span_a `leftOf`         span_b = a : mergeAsts as ys
   | span_a `leftOf`         span_b = a : mergeAsts as ys
+
+  -- These cases are to work around ASTs that are not fully disjoint
   | span_a `startsRightOf`  span_b = b : mergeAsts as ys
   | otherwise                      = a : mergeAsts as ys
   where
