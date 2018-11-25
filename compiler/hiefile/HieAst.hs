@@ -7,6 +7,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 module HieAst (mkHieFile) where
 
@@ -238,12 +239,21 @@ listScopes rhsScope (pat : pats) = RS sc pat : pats'
     sc = combineScopes scope $ mkScope $ getLoc p
 
 -- | 'listScopes' specialised to 'PScoped' things
-patScopes :: Maybe Span -> Scope -> Scope -> [LPat a] -> [PScoped (LPat a)]
+patScopes
+  :: Maybe Span
+  -> Scope
+  -> Scope
+  -> [LPat (GhcPass p)]
+  -> [PScoped (LPat (GhcPass p))]
 patScopes rsp useScope patScope xs =
-  map (\(RS sc a) -> PS rsp useScope sc a) $ listScopes patScope xs
+  map (\(RS sc a) -> PS rsp useScope sc (unLoc a)) $ listScopes patScope (map dL xs)
 
 -- | 'listScopes' specialised to 'TVScoped' things
-tvScopes :: TyVarScope -> Scope -> [LHsTyVarBndr a] -> [TVScoped (LHsTyVarBndr a)]
+tvScopes
+  :: TyVarScope
+  -> Scope
+  -> [LHsTyVarBndr a]
+  -> [TVScoped (LHsTyVarBndr a)]
 tvScopes tvScope rhsScope xs =
   map (\(RS sc a)-> TVS tvScope sc a) $ listScopes rhsScope xs
 
@@ -331,6 +341,9 @@ instance HasLoc (HsDataDefn GhcRn) where
     -- Most probably the rest will be unhelpful anyway
   loc _ = noSrcSpan
 
+instance HasLoc (Pat (GhcPass a)) where
+  loc (dL -> L l _) = l
+
 -- | The main worker class
 class ToHie a where
   toHie :: a -> HieM [HieAST Type]
@@ -412,10 +425,10 @@ instance HasType (LHsBind GhcTc) where
       _ -> makeNode bind spn
 
 instance HasType (LPat GhcRn) where
-  getTypeNode (L spn pat) = makeNode pat spn
+  getTypeNode (dL -> L spn pat) = makeNode pat spn
 
 instance HasType (LPat GhcTc) where
-  getTypeNode (L spn opat) = makeTypeNode opat spn (hsPatType opat)
+  getTypeNode (dL -> L spn opat) = makeTypeNode opat spn (hsPatType opat)
 
 instance HasType (LHsExpr GhcRn) where
   getTypeNode (L spn e) = makeNode e spn
@@ -503,12 +516,13 @@ instance ( ToHie (MatchGroup a (LHsExpr a))
     ExplicitBidirectional mg -> toHie mg
     _ -> pure []
 
-instance ( ToHie body
+instance ( a ~ GhcPass p
+         , ToHie body
          , ToHie (HsMatchContext (NameOrRdrName (IdP a)))
          , ToHie (PScoped (LPat a))
          , ToHie (GRHSs a body)
          , Data (Match a body)
-         ) => ToHie (LMatch a body) where
+         ) => ToHie (LMatch (GhcPass p) body) where
   toHie (L span m ) = concatM $ makeNode m span : case m of
     Match{m_ctxt=mctx, m_pats = pats, m_grhss =  grhss } ->
       [ toHie mctx
@@ -531,7 +545,8 @@ instance ( ToHie (HsMatchContext a)
   toHie (TransStmtCtxt a) = toHie a
   toHie _ = pure []
 
-instance ( ToHie (Context (Located (IdP a)))
+instance ( a ~ GhcPass p
+         , ToHie (Context (Located (IdP a)))
          , ToHie (RContext (HsRecFields a (PScoped (LPat a))))
          , ToHie (LHsExpr a)
          , ToHie (TScoped (LHsSigWcType a))
@@ -539,8 +554,8 @@ instance ( ToHie (Context (Located (IdP a)))
          , ToHie (TScoped (ProtectedSig a))
          , HasType (LPat a)
          , Data (HsSplice a)
-         ) => ToHie (PScoped (LPat a)) where
-  toHie (PS rsp scope pscope lpat@(L ospan opat)) = concatM $ getTypeNode lpat : case opat of
+         ) => ToHie (PScoped (LPat (GhcPass p))) where
+  toHie (PS rsp scope pscope lpat@(dL -> L ospan opat)) = concatM $ getTypeNode lpat : case opat of
       WildPat _ ->
         []
       VarPat _ lname ->
@@ -550,7 +565,7 @@ instance ( ToHie (Context (Located (IdP a)))
         [ toHie $ PS rsp scope pscope p
         ]
       AsPat _ lname pat ->
-        [ toHie $ C (PatternBind scope (combineScopes (mkLScope pat) pscope) rsp) lname
+        [ toHie $ C (PatternBind scope (combineScopes (mkLScope (dL pat)) pscope) rsp) lname
         , toHie $ PS rsp scope pscope pat
         ]
       ParPat _ pat ->
@@ -592,7 +607,7 @@ instance ( ToHie (Context (Located (IdP a)))
         ]
       SigPat _ pat sig ->
         [ toHie $ PS rsp scope pscope pat
-        , let cscope = mkLScope pat in
+        , let cscope = mkLScope (dL pat) in
             toHie $ TS (ResolvedScopes [cscope, scope, pscope]) (protectSig @a cscope sig)
               -- See Note [Scoping Rules for SigPat]
         ]
@@ -631,7 +646,8 @@ instance ( ToHie (Located body)
       ]
     XGRHS _ -> []
 
-instance ( ToHie (Context (Located (IdP a)))
+instance ( a ~ GhcPass p
+         , ToHie (Context (Located (IdP a)))
          , HasType (LHsExpr a)
          , ToHie (PScoped (LPat a))
          , ToHie (MatchGroup a (LHsExpr a))
@@ -648,7 +664,7 @@ instance ( ToHie (Context (Located (IdP a)))
          , Data (HsSplice a)
          , Data (HsTupArg a)
          , Data (AmbiguousFieldOcc a)
-         ) => ToHie (LHsExpr a) where
+         ) => ToHie (LHsExpr (GhcPass p)) where
   toHie e@(L mspan oexpr) = concatM $ getTypeNode e : case oexpr of
       HsVar _ (L _ var) ->
         [ toHie $ C Use (L mspan var) -- Patch up var location since typechecker removes it
@@ -803,9 +819,10 @@ instance ( ToHie (Context (Located (IdP a)))
         ]
       XExpr _ -> []
 
-instance ( ToHie (LHsExpr a)
+instance ( a ~ GhcPass p
+         , ToHie (LHsExpr a)
          , Data (HsTupArg a)
-         ) => ToHie (LHsTupArg a) where
+         ) => ToHie (LHsTupArg (GhcPass p)) where
   toHie (L span arg) = concatM $ makeNode arg span : case arg of
     Present _ expr ->
       [ toHie expr
@@ -813,7 +830,8 @@ instance ( ToHie (LHsExpr a)
     Missing _ -> []
     XTupArg _ -> []
 
-instance ( ToHie (PScoped (LPat a))
+instance ( a ~ GhcPass p
+         , ToHie (PScoped (LPat a))
          , ToHie (LHsExpr a)
          , ToHie (SigContext (LSig a))
          , ToHie (RScoped (LHsLocalBinds a))
@@ -821,7 +839,7 @@ instance ( ToHie (PScoped (LPat a))
          , ToHie (Located body)
          , Data (StmtLR a a (Located body))
          , Data (StmtLR a a (Located (HsExpr a)))
-         ) => ToHie (RScoped (LStmt a (Located body))) where
+         ) => ToHie (RScoped (LStmt (GhcPass p) (Located body))) where
   toHie (RS scope (L span stmt)) = concatM $ makeNode stmt span : case stmt of
       LastStmt _ body _ _ ->
         [ toHie body
@@ -942,14 +960,15 @@ instance ToHie (RFContext (Located (AmbiguousFieldOcc GhcTc))) where
       ]
     XAmbiguousFieldOcc _ -> []
 
-instance ( ToHie (PScoped (LPat a))
+instance ( a ~ GhcPass p
+         , ToHie (PScoped (LPat a))
          , ToHie (BindContext (LHsBind a))
          , ToHie (LHsExpr a)
          , ToHie (SigContext (LSig a))
          , ToHie (RScoped (HsValBindsLR a a))
          , Data (StmtLR a a (Located (HsExpr a)))
          , Data (HsLocalBinds a)
-         ) => ToHie (RScoped (ApplicativeArg a)) where
+         ) => ToHie (RScoped (ApplicativeArg (GhcPass p))) where
   toHie (RS sc (ApplicativeArgOne _ pat expr _)) = concatM
     [ toHie $ PS Nothing sc NoScope pat
     , toHie expr
@@ -974,7 +993,8 @@ instance ( ToHie (LHsCmd a)
       ]
     XCmdTop _ -> []
 
-instance ( ToHie (PScoped (LPat a))
+instance ( a ~ GhcPass p
+         , ToHie (PScoped (LPat a))
          , ToHie (BindContext (LHsBind a))
          , ToHie (LHsExpr a)
          , ToHie (MatchGroup a (LHsCmd a))
@@ -985,7 +1005,7 @@ instance ( ToHie (PScoped (LPat a))
          , Data (StmtLR a a (Located (HsCmd a)))
          , Data (HsLocalBinds a)
          , Data (StmtLR a a (Located (HsExpr a)))
-         ) => ToHie (LHsCmd a) where
+         ) => ToHie (LHsCmd (GhcPass p)) where
   toHie (L span cmd) = concatM $ makeNode cmd span : case cmd of
       HsCmdArrApp _ a b _ _ ->
         [ toHie a

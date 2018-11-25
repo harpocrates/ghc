@@ -82,12 +82,13 @@ hieTypeToIface = foldType go
     go HCoercionTy = IfaceTyVar "<coercion type>"
     go (HTyConApp a xs) = IfaceTyConApp a (hieToIfaceArgs xs)
 
+    -- This isn't fully faithful - we can't produce the 'Inferred' case
     hieToIfaceArgs :: HieArgs IfaceType -> IfaceAppArgs
     hieToIfaceArgs (HieArgs xs) = go' xs
       where
         go' [] = IA_Nil
-        go' ((True ,x):xs) = IA_Vis x $ go' xs
-        go' ((False,x):xs) = IA_Invis x $ go' xs
+        go' ((True ,x):xs) = IA_Arg x Required $ go' xs
+        go' ((False,x):xs) = IA_Arg x Specified $ go' xs
 
 data HieTypeState
   = HTS
