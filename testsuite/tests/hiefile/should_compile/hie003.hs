@@ -32,7 +32,7 @@ class Plugh p where
     plugh :: p a a -> p b b -> p (a -> b) (b -> a)
 
 instance Plugh Either where
-    plugh (Left a) _ = Right $ const a
-    plugh (Right a) _ = Right $ const a
+    plugh (Left a) (Left {}) = Right $ const a
+    plugh (Right a) (Right {}) = Right $ const a
     plugh _ (Left b) = Left $ const b
     plugh _ (Right b) = Left $ const b
