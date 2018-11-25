@@ -1042,7 +1042,8 @@ runPhase (RealPhase (Hsc src_flavour)) input_fn dflags0
                 -- Otherwise look at file modification dates
              else do dest_file_mod <- sourceModified dest_file src_timestamp
                      hie_file_mod <- if gopt Opt_IdeInfo dflags
-                                        then sourceModified hie_file src_timestamp
+                                        then sourceModified hie_file
+                                                            src_timestamp
                                         else pure False
                      if dest_file_mod || hie_file_mod
                         then return SourceModified
@@ -1633,8 +1634,9 @@ getLocation src_flavour mod_name = do
         location1 <- liftIO $ mkHomeModLocation2 dflags mod_name basename suff
 
         -- Boot-ify it if necessary
-        let location2 | HsBootFile <- src_flavour = addBootSuffixLocnOut location1
-                      | otherwise                 = location1
+        let location2
+              | HsBootFile <- src_flavour = addBootSuffixLocnOut location1
+              | otherwise                 = location1
 
 
         -- Take -ohi into account if present

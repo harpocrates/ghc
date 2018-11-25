@@ -33,14 +33,19 @@ import IfaceType
 import ToIface
 import VarEnv
 
-generateReferencesMap :: Foldable f => f (HieAST a) -> M.Map Identifier [(Span, IdentifierDetails a)]
-generateReferencesMap asts = foldr (\ast m -> M.unionWith (++) (go ast) m) M.empty asts
+generateReferencesMap
+  :: Foldable f
+  => f (HieAST a)
+  -> M.Map Identifier [(Span, IdentifierDetails a)]
+generateReferencesMap = foldr (\ast m -> M.unionWith (++) (go ast) m) M.empty
   where
     go ast = M.unionsWith (++) (this : map go (nodeChildren ast))
-      where this = fmap (pure . (nodeSpan ast,)) $ nodeIdentifiers $ nodeInfo ast
+      where
+        this = fmap (pure . (nodeSpan ast,)) $ nodeIdentifiers $ nodeInfo ast
 
 renderHieType :: DynFlags -> HieTypeFix -> String
-renderHieType df ht = renderWithStyle df (ppr $ hieTypeToIface ht) (defaultUserStyle df)
+renderHieType df ht = renderWithStyle df (ppr $ hieTypeToIface ht) sty
+  where sty = defaultUserStyle df
 
 resolveVisibility :: Type -> [Type] -> [(Bool,Type)]
 resolveVisibility kind ty_args
@@ -74,7 +79,8 @@ hieTypeToIface = foldType go
     go (HTyVarTy n) = IfaceTyVar $ occNameFS $ getOccName n
     go (HAppTy a b) = IfaceAppTy a (hieToIfaceArgs b)
     go (HLitTy l) = IfaceLitTy l
-    go (HForAllTy ((n,k),af) t) = IfaceForAllTy (Bndr (IfaceTvBndr (occNameFS $ getOccName n, k)) af) t
+    go (HForAllTy ((n,k),af) t) = let b = (occNameFS $ getOccName n, k)
+                                  in IfaceForAllTy (Bndr (IfaceTvBndr b) af) t
     go (HFunTy pred a b)
       | pred = IfaceDFunTy a b
       | otherwise = IfaceFunTy a b
@@ -106,7 +112,9 @@ freshTypeIndex = do
   modify' $ \hts -> hts { freshIndex = index+1 }
   return index
 
-compressTypes :: HieASTs Type -> (HieASTs TypeIndex, A.Array TypeIndex HieTypeFlat)
+compressTypes
+  :: HieASTs Type
+  -> (HieASTs TypeIndex, A.Array TypeIndex HieTypeFlat)
 compressTypes asts = (a, arr)
   where
     (a, (HTS _ m i)) = flip runState initialHTS $
@@ -169,14 +177,20 @@ resolveTyVarScopes asts = M.map go asts
 resolveTyVarScopeLocal :: HieAST a -> M.Map FastString (HieAST a) -> HieAST a
 resolveTyVarScopeLocal ast asts = go ast
   where
-    resolveNameScope dets = dets{identInfo = S.map resolveScope (identInfo dets)}
+    resolveNameScope dets = dets{identInfo =
+      S.map resolveScope (identInfo dets)}
     resolveScope (TyVarBind sc (UnresolvedScope names Nothing)) =
       TyVarBind sc $ ResolvedScopes
-        $ concatMap (\name -> map LocalScope $ maybeToList $ getNameBinding name asts) names
+        [ LocalScope binding
+        | name <- names
+        , Just binding <- [getNameBinding name asts]
+        ]
     resolveScope (TyVarBind sc (UnresolvedScope names (Just sp))) =
       TyVarBind sc $ ResolvedScopes
-        $ concatMap (\name ->
-            map LocalScope $ maybeToList $ getNameBindingInClass name sp asts) names
+        [ LocalScope binding
+        | name <- names
+        , Just binding <- [getNameBindingInClass name sp asts]
+        ]
     resolveScope scope = scope
     go (Node info span children) = Node info' span $ map go children
       where
@@ -193,17 +207,24 @@ getNameScope n asts = do
   (scopes,_) <- getNameScopeAndBinding n asts
   return scopes
 
-getNameBindingInClass :: Name -> Span -> M.Map FastString (HieAST a) -> Maybe Span
+getNameBindingInClass
+  :: Name
+  -> Span
+  -> M.Map FastString (HieAST a)
+  -> Maybe Span
 getNameBindingInClass n sp asts = do
   ast <- M.lookup (srcSpanFile sp) asts
   getFirst $ foldMap First $ do
     child <- flattenAst ast
     dets <- maybeToList
       $ M.lookup (Right n) $ nodeIdentifiers $ nodeInfo child
-    let binding = getFirst $ foldMap (First . getBindSiteFromContext) (identInfo dets)
-    return binding
+    let binding = foldMap (First . getBindSiteFromContext) (identInfo dets)
+    return (getFirst binding)
 
-getNameScopeAndBinding :: Name -> M.Map FastString (HieAST a) -> Maybe ([Scope], Maybe Span)
+getNameScopeAndBinding
+  :: Name
+  -> M.Map FastString (HieAST a)
+  -> Maybe ([Scope], Maybe Span)
 getNameScopeAndBinding n asts = case nameSrcSpan n of
   RealSrcSpan sp -> do -- @Maybe
     ast <- M.lookup (srcSpanFile sp) asts
@@ -213,8 +234,8 @@ getNameScopeAndBinding n asts = case nameSrcSpan n of
       dets <- maybeToList
         $ M.lookup (Right n) $ nodeIdentifiers $ nodeInfo node
       scopes <- maybeToList $ foldMap getScopeFromContext (identInfo dets)
-      let binding = getFirst $ foldMap (First . getBindSiteFromContext) (identInfo dets)
-      return $ Just (scopes, binding)
+      let binding = foldMap (First . getBindSiteFromContext) (identInfo dets)
+      return $ Just (scopes, getFirst binding)
   _ -> Nothing
 
 getScopeFromContext :: ContextInfo -> Maybe [Scope]
@@ -235,10 +256,15 @@ flattenAst :: HieAST a -> [HieAST a]
 flattenAst n =
   n : concatMap flattenAst (nodeChildren n)
 
-smallestContainingSatisfying :: Span -> (HieAST a -> Bool) -> HieAST a -> Maybe (HieAST a)
+smallestContainingSatisfying
+  :: Span
+  -> (HieAST a -> Bool)
+  -> HieAST a
+  -> Maybe (HieAST a)
 smallestContainingSatisfying sp cond node
   | nodeSpan node `containsSpan` sp = getFirst $ mconcat
-      [ foldMap (First . smallestContainingSatisfying sp cond) $ nodeChildren node
+      [ foldMap (First . smallestContainingSatisfying sp cond) $
+          nodeChildren node
       , First $ if cond node then Just node else Nothing
       ]
   | sp `containsSpan` nodeSpan node = Nothing
@@ -248,7 +274,8 @@ selectLargestContainedBy :: Span -> HieAST a -> Maybe (HieAST a)
 selectLargestContainedBy sp node
   | sp `containsSpan` nodeSpan node = Just node
   | nodeSpan node `containsSpan` sp =
-      getFirst $ foldMap (First . selectLargestContainedBy sp) $ nodeChildren node
+      getFirst $ foldMap (First . selectLargestContainedBy sp) $
+        nodeChildren node
   | otherwise = Nothing
 
 selectSmallestContaining :: Span -> HieAST a -> Maybe (HieAST a)
@@ -383,7 +410,11 @@ combineScopes (LocalScope a) (LocalScope b) =
   mkScope $ combineSrcSpans (RealSrcSpan a) (RealSrcSpan b)
 
 {-# INLINEABLE makeNode #-}
-makeNode :: (Applicative m, Data a) => a -> SrcSpan -> m [HieAST b]
+makeNode
+  :: (Applicative m, Data a)
+  => a                       -- ^ helps fill in 'nodeAnnotations' (with 'Data')
+  -> SrcSpan                 -- ^ return an empty list if this is unhelpful
+  -> m [HieAST b]
 makeNode x spn = pure $ case spn of
   RealSrcSpan span -> [Node (simpleNodeInfo cons typ) span []]
   _ -> []
@@ -392,7 +423,12 @@ makeNode x spn = pure $ case spn of
     typ = mkFastString . show . typeRepTyCon . typeOf $ x
 
 {-# INLINEABLE makeTypeNode #-}
-makeTypeNode :: (Applicative m, Data a) => a -> SrcSpan -> Type -> m [HieAST Type]
+makeTypeNode
+  :: (Applicative m, Data a)
+  => a                       -- ^ helps fill in 'nodeAnnotations' (with 'Data')
+  -> SrcSpan                 -- ^ return an empty list if this is unhelpful
+  -> Type                    -- ^ type to associate with the node
+  -> m [HieAST Type]
 makeTypeNode x spn etyp = pure $ case spn of
   RealSrcSpan span ->
     [Node (NodeInfo (S.singleton (cons,typ)) [etyp] M.empty) span []]

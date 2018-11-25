@@ -2186,7 +2186,8 @@ summariseFile hsc_env old_summaries file mb_phase obj_allowed maybe_buf
                         then liftIO $ getObjTimestamp location NotBoot
                         else return Nothing
                   hi_timestamp <- maybeGetIfaceDate dflags location
-                  hie_timestamp <- modificationTimeIfExists (ml_hie_file location)
+                  let hie_location = ml_hie_file location
+                  hie_timestamp <- modificationTimeIfExists hie_location
 
                   -- We have to repopulate the Finder's cache because it
                   -- was flushed before the downsweep.

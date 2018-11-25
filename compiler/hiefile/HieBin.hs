@@ -194,7 +194,8 @@ putName (HieSymbolTable next ref) bh name = do
   case lookupUFM symmap name of
     Just (off, ExternalName mod occ (UnhelpfulSpan _))
       | isGoodSrcSpan (nameSrcSpan name) -> do
-      writeIORef ref $! addToUFM symmap name (off, ExternalName mod occ (nameSrcSpan name))
+      let hieName = ExternalName mod occ (nameSrcSpan name)
+      writeIORef ref $! addToUFM symmap name (off, hieName)
       put_ bh (fromIntegral off :: Word32)
     Just (off, LocalName _occ span)
       | notLocal (toHieName name) || nameSrcSpan name /= span -> do
@@ -217,8 +218,10 @@ putName (HieSymbolTable next ref) bh name = do
 
 toHieName :: Name -> HieName
 toHieName name
-  | isKnownKeyName name = KnownKeyName $ nameUnique name
-  | isExternalName name = ExternalName (nameModule name) (nameOccName name) (nameSrcSpan name)
+  | isKnownKeyName name = KnownKeyName (nameUnique name)
+  | isExternalName name = ExternalName (nameModule name)
+                                       (nameOccName name)
+                                       (nameSrcSpan name)
   | otherwise = LocalName (nameOccName name) (nameSrcSpan name)
 
 fromHieName :: NameCache -> HieName -> (NameCache, Name)

@@ -271,8 +271,8 @@ instance Outputable a => Outputable (IdentifierDetails a) where
   ppr x = text "IdentifierDetails" <+> ppr (identType x) <+> ppr (identInfo x)
 
 instance Semigroup (IdentifierDetails a) where
-  d1 <> d2 =
-    IdentifierDetails (identType d1 <|> identType d2) (S.union (identInfo d1) (identInfo d2))
+  d1 <> d2 = IdentifierDetails (identType d1 <|> identType d2)
+                               (S.union (identInfo d1) (identInfo d2))
 
 instance Monoid (IdentifierDetails a) where
   mempty = IdentifierDetails Nothing S.empty

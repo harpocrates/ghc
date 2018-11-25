@@ -406,7 +406,8 @@ extract_renamed_stuff mod_summary tc_result = do
     liftIO $ dumpIfSet_dyn dflags Opt_D_dump_rn_ast "Renamer" $
                            showAstData NoBlankSrcSpan rn_info
     when (gopt Opt_IdeInfo dflags) $ do
-        hieFile <- mkHieFile mod_summary (tcg_binds tc_result) (fromJust rn_info)
+        hieFile <- mkHieFile mod_summary (tcg_binds tc_result)
+                                         (fromJust rn_info)
         let out_file = ml_hie_file $ ms_location mod_summary
         liftIO $ writeHieFile out_file hieFile
         when (gopt Opt_ValidateHie dflags) $ do

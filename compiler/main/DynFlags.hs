@@ -2502,7 +2502,11 @@ setStubDir    f d = d { stubDir    = Just f
   -- \#included from the .hc file when compiling via C (i.e. unregisterised
   -- builds).
 setDumpDir    f d = d { dumpDir    = Just f}
-setOutputDir  f = setObjectDir f . setHieDir f . setHiDir f . setStubDir f . setDumpDir f
+setOutputDir  f = setObjectDir f
+                . setHieDir f
+                . setHiDir f
+                . setStubDir f
+                . setDumpDir f
 setDylibInstallName  f d = d { dylibInstallName = Just f}
 
 setObjectSuf    f d = d { objectSuf    = f}

@@ -63,15 +63,16 @@ diffAst diffType (Node info1 span1 xs1) (Node info2 span2 xs2) =
     spanDiff
       | span1 /= span2 = [hsep ["Spans", ppr span1, "and", ppr span2, "differ"]]
       | otherwise = []
-    infoDiff = (diffList eqDiff `on` (S.toAscList . nodeAnnotations)) info1 info2
-            ++ (diffList diffType `on` nodeType) info1 info2
-            ++ (diffIdents `on` nodeIdentifiers) info1 info2
+    infoDiff
+      = (diffList eqDiff `on` (S.toAscList . nodeAnnotations)) info1 info2
+     ++ (diffList diffType `on` nodeType) info1 info2
+     ++ (diffIdents `on` nodeIdentifiers) info1 info2
     diffIdents a b = (diffList diffIdent `on` normalizeIdents) a b
     diffIdent (a,b) (c,d) = diffName a c
                          ++ eqDiff b d
     diffName (Right a) (Right b) = case (a,b) of
-      (ExternalName mod occ _, ExternalName mod' occ' _) -> eqDiff (mod,occ) (mod',occ')
-      (LocalName occ _, ExternalName _ occ' _) -> eqDiff occ occ'
+      (ExternalName m o _, ExternalName m' o' _) -> eqDiff (m,o) (m',o')
+      (LocalName o _, ExternalName _ o' _) -> eqDiff o o'
       _ -> eqDiff a b
     diffName a b = eqDiff a b
 
@@ -123,7 +124,8 @@ validateScopes asts = M.foldrWithKey (\k a b -> valid k a ++ b) [] refMap
     valid (Left _) _ = []
     valid (Right n) refs = concatMap inScope refs
       where
-        scopes =  case foldMap (foldMap getScopeFromContext . identInfo . snd) refs of
+        mapRef = foldMap getScopeFromContext . identInfo . snd
+        scopes = case foldMap mapRef refs of
           Just xs -> xs
           Nothing -> []
         inScope (sp, dets)
