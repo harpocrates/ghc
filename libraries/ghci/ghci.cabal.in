@@ -21,6 +21,8 @@ Flag ghci
     Description: Build GHCi support.
     Default: False
     Manual: True
+flag ffi
+  default: @CabalHaveLibffi@
 
 source-repository head
     type:     git
@@ -68,7 +70,8 @@ library
         GHCi.TH.Binary
         SizedSeq
 
-    extra-libraries: ffi
+    if flag(ffi)
+       extra-libraries: ffi
 
     Build-Depends:
         array            == 0.5.*,
