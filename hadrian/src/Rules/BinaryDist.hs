@@ -98,7 +98,7 @@ bindistRules = do
 
         version        <- setting ProjectVersion
         targetPlatform <- setting TargetPlatformFull
-        distDir        <- cabalDistDir
+        distDir        <- Context.distDir
         rtsDir         <- pkgIdentifier rts
 
         let ghcBuildDir      = root -/- stageString Stage1

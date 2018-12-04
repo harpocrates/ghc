@@ -52,7 +52,7 @@ ghcLinkArgs = builder (Ghc LinkHs) ? do
     originPath <- dropFileName <$> getOutput
     context <- getContext
     libPath' <- expr (libPath context)
-    distDir <- expr Context.cabalDistDir
+    distDir <- expr Context.distDir
     let
         distPath = libPath' -/- distDir
         originToLibsDir = makeRelativeNoSysLink originPath distPath
