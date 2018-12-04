@@ -8,7 +8,7 @@ module Context (
     -- * Paths
     contextDir, buildPath, buildDir, pkgInplaceConfig, pkgSetupConfigFile,
     pkgHaddockFile, pkgLibraryFile, pkgGhciLibraryFile, pkgConfFile, objectPath,
-    contextPath, getContextPath, libDir, libPath, distDir
+    contextPath, getContextPath, libDir, libPath, distDir, cabalDistDir
     ) where
 
 import Base
@@ -58,6 +58,15 @@ distDir = do
     hostOs         <- setting BuildOs
     hostArch       <- setting BuildArch
     return $ hostArch ++ "-" ++ hostOs ++ "-ghc-" ++ version
+
+-- | Like 'distDir' but uses Cabal's naming convention for the OS and
+-- architecture
+cabalDistDir :: Action FilePath
+cabalDistDir = do
+    version        <- setting ProjectVersion
+    cabalHostOs    <- cabalOsString <$> setting BuildOs
+    cabalHostArch  <- cabalArchString <$> setting BuildArch
+    return $ cabalHostArch ++ "-" ++ cabalHostOs ++ "-ghc-" ++ version
 
 pkgFile :: Context -> String -> String -> Action FilePath
 pkgFile context@Context {..} prefix suffix = do

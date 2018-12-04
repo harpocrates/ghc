@@ -43,33 +43,33 @@ compileC = builder (Ghc CompileCWithGhc) ? do
 ghcLinkArgs :: Args
 ghcLinkArgs = builder (Ghc LinkHs) ? do
     pkg     <- getPackage
-    libs    <- pkg == hp2ps ? pure ["m"]
-    intLib  <- getIntegerPackage
-    gmpLibs <- notStage0 ? intLib == integerGmp ? pure ["gmp"]
+    libs    <- getContextData extraLibs
+    libDirs <- getContextData extraLibDirs
     dynamic <- requiresDynamic
+    darwin  <- expr osxHost
 
     -- Relative path from the output (rpath $ORIGIN).
     originPath <- dropFileName <$> getOutput
     context <- getContext
     libPath' <- expr (libPath context)
-    distDir <- expr Context.distDir
+    distDir <- expr Context.cabalDistDir
     let
         distPath = libPath' -/- distDir
         originToLibsDir = makeRelativeNoSysLink originPath distPath
+        rpath | darwin = "@loader_path" -/- originToLibsDir
+              | otherwise = "$ORIGIN" -/- originToLibsDir
 
     mconcat [ dynamic ? mconcat
                 [ arg "-dynamic"
-                -- TODO what about windows / OSX?
-                , notStage0 ? pure
-                    [ "-optl-Wl,-rpath"
-                    , "-optl-Wl," ++ ("$ORIGIN" -/- originToLibsDir) ]
+                , isLibrary pkg ? pure [ "-shared", "-dynload", "deploy" ]
+                , notStage0 ?
+                  hostSupportsRPaths ? arg ("-optl-Wl,-rpath," ++ rpath)
                 ]
-            , (dynamic && isLibrary pkg) ?
-                pure [ "-shared", "-dynload", "deploy" ]
             , arg "-no-auto-link-packages"
             ,      nonHsMainPackage pkg  ? arg "-no-hs-main"
             , not (nonHsMainPackage pkg) ? arg "-rtsopts"
-            , pure [ "-optl-l" ++           lib | lib <- libs ++ gmpLibs ]
+            , pure [ "-l" ++ lib    | lib <-    libs    ]
+            , pure [ "-L" ++ libDir | libDir <- libDirs ]
             ]
 
 findHsDependencies :: Args
