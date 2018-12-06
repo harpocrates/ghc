@@ -3,7 +3,7 @@ module Oracles.Setting (
     getSettingList,  anyTargetPlatform, anyTargetOs, anyTargetArch, anyHostOs,
     ghcWithInterpreter, ghcEnableTablesNextToCode, useLibFFIForAdjustors,
     ghcCanonVersion, cmdLineLengthLimit, iosHost, osxHost, windowsHost,
-    topDirectory, libsuf
+    hostSupportsRPaths, topDirectory, libsuf
     ) where
 
 import Hadrian.Expression
@@ -165,6 +165,11 @@ iosHost = anyHostOs ["ios"]
 -- | Check whether the host OS setting is set to @"darwin"@.
 osxHost :: Action Bool
 osxHost = anyHostOs ["darwin"]
+
+-- | Check whether the host OS supports the @-rpath@ linker option when
+-- using dynamic linking.
+hostSupportsRPaths :: Action Bool
+hostSupportsRPaths = anyHostOs ["linux", "darwin", "freebsd"]
 
 -- | Check whether the host OS setting is set to @"mingw32"@ or @"cygwin32"@.
 windowsHost :: Action Bool
