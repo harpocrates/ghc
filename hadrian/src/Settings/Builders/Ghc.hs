@@ -45,6 +45,7 @@ ghcLinkArgs = builder (Ghc LinkHs) ? do
     pkg     <- getPackage
     libs    <- getContextData extraLibs
     libDirs <- getContextData extraLibDirs
+    fmwks   <- getContextData frameworks
     dynamic <- requiresDynamic
     darwin  <- expr osxHost
 
@@ -70,6 +71,7 @@ ghcLinkArgs = builder (Ghc LinkHs) ? do
             , not (nonHsMainPackage pkg) ? arg "-rtsopts"
             , pure [ "-l" ++ lib    | lib <-    libs    ]
             , pure [ "-L" ++ libDir | libDir <- libDirs ]
+            , darwin ? pure (concat [ ["-framework", fmwk] | fmwk <- fmwks ])
             ]
 
 findHsDependencies :: Args
