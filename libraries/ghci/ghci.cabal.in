@@ -68,6 +68,8 @@ library
         GHCi.TH.Binary
         SizedSeq
 
+    extra-libraries: ffi
+
     Build-Depends:
         array            == 0.5.*,
         base             >= 4.8 && < 4.13,
