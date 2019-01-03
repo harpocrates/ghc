@@ -1,0 +1,17 @@
+name:                integer
+version:             0.1.0.0
+synopsis:            Signature package Integer and Natural 
+description:         TODO
+license:             BSD3
+license-file:        LICENSE
+author:              Alec Theriault
+maintainer:          alec.theriault@gmail.com
+category:            Signature
+build-type:          Simple
+extra-source-files:  ChangeLog.md, README.md
+cabal-version:       >= 1.25
+
+library
+  signatures:          GHC.Integer
+                       GHC.Integer.Logarithms
+  build-depends:       ghc-prim

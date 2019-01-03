@@ -1,0 +1,68 @@
+{-# LANGUAGE CPP, MagicHash, NoImplicitPrelude #-}
+
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  GHC.Integer
+-- Copyright   :  (c) Alec theriault 2018 
+-- License     :  BSD3
+--
+-- Maintainer  :  alec.theriault@gmail.com
+-- Stability   :  internal
+-- Portability :  non-portable (GHC Extensions)
+--
+-- A simple definition of the 'Natural' type.
+--
+-----------------------------------------------------------------------------
+
+#include "MachDeps.h"
+
+signature GHC.Natural where
+
+data Natural
+
+mkNatural :: [Word]	 -- ^ value expressed in 32 bit chunks, least significant first
+          -> Natural
+
+isValidNatural
+
+plusNatural
+
+minusNatural
+
+minusNaturalMaybe
+
+timesNatural
+
+negatenatureal
+
+signumNatural
+
+quotRemNatural
+
+quotNatural
+
+remNatural
+
+andNatural
+
+lcmNatural
+
+andNatural
+
+orNatural
+
+xorNatural
+
+bitNatural
+
+testBitNatural
+
+shitCountNatural
+
+shiftLNatural
+
+shiftRNatural
+
+naturalToInteger
+
+naturalTo Integer

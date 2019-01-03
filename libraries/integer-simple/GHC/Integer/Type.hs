@@ -417,6 +417,37 @@ remInteger :: Integer -> Integer -> Integer
 x `remInteger` y = case x `quotRemInteger` y of
                    (# _, r #) -> r
 
+{-# NOINLINE gcdInteger #-}
+gcdInteger :: Integer -> Integer -> Integer
+gcdInteger (Positive a) (Positive b) = Positive (gcdPositive a b)
+gcdInteger (Positive a) (Negative b) = Positive (gcdPositive a b)
+gcdInteger (Negative a) (Positive b) = Positive (gcdPositive a b)
+gcdInteger (Negative a) (Negative b) = Positive (gcdPositive a b)
+gcdInteger Naught                  b = Naught 
+gcdInteger a                  Naught = Naught
+
+gcdPositive :: Positive -> Positive -> Positive
+gcdPositive p1 p2 = case p1 `quotRemPositive` p2 of
+                        (# _, Positive r #) -> gcdPositive p2 r
+                        (# _, Naught     #) -> p2
+                        (# _, Negative   #) -> errorPositive -- XXX Can't happen
+
+
+{-# NOINLINE lcmInteger #-}
+lcmInteger :: Integer -> Integer -> Integer
+lcmInteger (Positive a) (Positive b) = Positive (lcmPositive a b)
+lcmInteger (Positive a) (Negative b) = Positive (lcmPositive a b)
+lcmInteger (Negative a) (Positive b) = Positive (lcmPositive a b)
+lcmInteger (Negative a) (Negative b) = Positive (lcmPositive a b)
+lcmInteger Naught                  b = absInteger b
+lcmInteger a                  Naught = absInteger b
+
+lcmPositive :: Positive -> Positive -> Positive
+lcmPositive p1 p2 = case p1 `quotRemPositive` (p1 `gcdPositive` p2) of
+                        (# Positive q, _ #) -> q `timesPositive` p2
+                        (# _,          _ #) -> errorPositive -- XXX Can't happen
+
+
 {-# NOINLINE compareInteger #-}
 compareInteger :: Integer -> Integer -> Ordering
 Positive x `compareInteger` Positive y = x `comparePositive` y

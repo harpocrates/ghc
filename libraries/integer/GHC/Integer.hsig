@@ -1,0 +1,186 @@
+{-# LANGUAGE CPP, MagicHash, NoImplicitPrelude #-}
+
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  GHC.Integer
+-- Copyright   :  (c) Alec theriault 2018 
+-- License     :  BSD3
+--
+-- Maintainer  :  alec.theriault@gmail.com
+-- Stability   :  internal
+-- Portability :  non-portable (GHC Extensions)
+--
+-- A simple definition of the 'Integer' type.
+--
+-----------------------------------------------------------------------------
+
+#include "MachDeps.h"
+
+module GHC.Integer where
+
+data Integer
+
+
+-- * Construct 'Integer's
+
+-- | Construct 'Integer' value from list of 'Int's.
+--
+-- This function is used by GHC for constructing 'Integer' literals.
+mkInteger :: Bool   -- ^ sign of integer ('True' if non-negative)
+          -> [Int]  -- ^ absolute value expressed in 31 bit chunks, least
+                    --   significant first (ideally these would be machine-word
+                    --   'Word's rather than 31-bit truncated 'Int's)
+          -> Integer
+
+-- | Should rather be called @intToInteger@
+smallInteger :: Int# -> Integer
+
+wordToInteger :: Word# -> Integer
+
+#if WORD_SIZE_IN_BITS < 64
+
+word64ToInteger :: Word64# -> Integer
+
+int64ToInteger :: Int64# -> Integer
+
+#endif
+
+-- * Conversion to other integral types
+
+integerToWord :: Integer -> Word#
+
+-- | Truncates 'Integer' to least-significant 'Int#'
+integerToInt :: Integer -> Int#
+
+#if WORD_SIZE_IN_BITS < 64
+
+integerToWord64 :: Integer -> Word64#
+
+integerToInt64 :: Integer -> Int64#
+
+#endif
+
+
+-- * Helpers for 'RealFloat' type-class operations
+
+encodeFloatInteger :: Integer -> Int# -> Float#
+floatFromInteger :: Integer -> Float#
+
+encodeDoubleInteger :: Integer -> Int# -> Double#
+decodeDoubleInteger :: Double# -> (# Integer, Int# #)
+doubleFromInteger :: Integer -> Double#
+
+
+-- * Arithmetic operations
+
+-- | Add two 'Integer's
+plusInteger :: Integer -> Integer -> Integer
+
+-- | Subtract one 'Integer' from another.
+minusInteger :: Integer -> Integer -> Integer
+
+-- | Multiply two 'Integer's
+timesInteger :: Integer -> Integer -> Integer
+
+-- | Negate 'Integer'
+negateInteger :: Integer -> Integer
+
+-- | Compute absolute value of an 'Integer'
+absInteger :: Integer -> Integer
+
+-- | Return @-1@, @0@, and @1@ depending on whether argument is
+-- negative, zero, or positive, respectively
+signumInteger :: Integer -> Integer
+
+-- | Simultaneous 'divInteger' and 'modInteger'.
+--
+-- Divisor must be non-zero otherwise the GHC runtime will terminate
+-- with a division-by-zero fault.
+divModInteger :: Integer -> Integer -> (# Integer, Integer #)
+
+divInteger :: Integer -> Integer -> Integer
+
+modInteger :: Integer -> Integer -> Integer
+
+-- | Simultaneous 'quotInteger' and 'remInteger'.
+--
+-- Divisor must be non-zero otherwise the GHC runtime will terminate
+-- with a division-by-zero fault.
+quotRemInteger :: Integer -> Integer -> (# Integer, Integer #)
+
+quotInteger :: Integer -> Integer -> Integer
+
+remInteger :: Integer -> Integer -> Integer
+
+
+-- * Comparison predicates
+
+eqInteger :: Integer -> Integer -> Bool
+neqInteger :: Integer -> Integer -> Bool
+leInteger :: Integer -> Integer -> Bool
+ltInteger :: Integer -> Integer -> Bool
+gtInteger :: Integer -> Integer -> Bool
+geInteger :: Integer -> Integer -> Bool
+
+compareInteger :: Integer -> Integer -> Ordering
+
+instance Eq Integer where
+    (==)    = eqInteger
+    (/=)    = neqInteger
+
+instance Ord Integer where
+    compare = compareInteger
+    (>)     = gtInteger
+    (>=)    = geInteger
+    (<)     = ltInteger
+    (<=)    = leInteger
+
+-- ** 'Int#'-boolean valued versions of comparison predicates
+--
+-- These operations return @0#@ and @1#@ instead of 'False' and
+-- 'True' respectively.  See
+-- <https://ghc.haskell.org/trac/ghc/wiki/PrimBool PrimBool wiki-page>
+-- for more details
+
+eqInteger# :: Integer -> Integer -> Int#
+neqInteger# :: Integer -> Integer -> Int#
+leInteger# :: Integer -> Integer -> Int#
+gtInteger# :: Integer -> Integer -> Int#
+ltInteger# :: Integer -> Integer -> Int#
+geInteger# :: Integer -> Integer -> Int#
+
+
+-- * Bit-operations
+
+-- | Bitwise AND operation
+andInteger :: Integer -> Integer -> Integer
+
+-- | Bitwise OR operation
+orInteger :: Integer -> Integer -> Integer
+
+-- | Bitwise XOR operation
+xorInteger :: Integer -> Integer -> Integer
+
+-- | Bitwise @NOT@ operation
+complementInteger :: Integer -> Integer
+
+-- | Shift-left operation
+--
+-- Even though the shift-amount is expressed as `Int#`, the result is
+-- undefined for negative shift-amounts.
+shiftLInteger :: Integer -> Int# -> Integer
+
+-- | Arithmetic shift-right operation
+--
+-- Even though the shift-amount is expressed as `Int#`, the result is
+-- undefined for negative shift-amounts.
+shiftRInteger :: Integer -> Int# -> Integer
+
+-- | Test if /n/-th bit is set.
+testBitInteger :: Integer -> Int# -> Bool
+
+
+-- * Hashing
+
+hashInteger :: Integer -> Int#
+
