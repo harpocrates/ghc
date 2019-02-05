@@ -73,6 +73,7 @@ prepareTree dest = do
         , Test "libraries/random"
         , Test "libraries/stm"
         , Test "libraries/vector"
+        , Test "libraries/xml"
         , Test "mk/build.mk" ]
     srcDirs =
         [ "bindisttest"

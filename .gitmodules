@@ -87,6 +87,9 @@
 	path = libraries/parallel
 	url = ../packages/parallel.git
 	ignore = untracked
+[submodule "libraries/xml"]
+	path = libraries/xml
+	url = https://github.com/GaloisInc/xml.git
 [submodule "libraries/stm"]
 	path = libraries/stm
 	url = ../packages/stm.git

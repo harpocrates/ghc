@@ -136,6 +136,7 @@ testsuitePackages = do
              , hsc2hs
              , iserv
              , parallel
+             , xml
              , runGhc
              , unlit         ] ++
              [ timeout | win ]

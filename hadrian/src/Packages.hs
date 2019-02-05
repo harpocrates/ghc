@@ -8,7 +8,7 @@ module Packages (
     hsc2hs, hp2ps, hpc, hpcBin, integerGmp, integerSimple, iserv, libffi,
     libiserv, mtl, parsec, parallel, pretty, primitive, process, rts, runGhc,
     stm, templateHaskell, terminfo, text, time, timeout, touchy, transformers,
-    unlit, unix, win32, xhtml, ghcPackages, isGhcPackage,
+    unlit, unix, win32, xhtml, xml, ghcPackages, isGhcPackage,
 
     -- * Package information
     programName, nonHsMainPackage, autogenPath, programPath, timeoutPath,
@@ -36,7 +36,7 @@ ghcPackages =
     , ghcHeap, ghci, ghcPkg, ghcPrim, ghcTags, haddock, haskeline, hsc2hs, hp2ps
     , hpc, hpcBin, integerGmp, integerSimple, iserv, libffi, libiserv, mtl
     , parsec, parallel, pretty, process, rts, runGhc, stm, templateHaskell
-    , terminfo, text, time, touchy, transformers, unlit, unix, win32, xhtml
+    , terminfo, text, time, touchy, transformers, unlit, unix, win32, xhtml, xml
     , timeout ]
 
 -- TODO: Optimise by switching to sets of packages.
@@ -101,6 +101,7 @@ unlit               = util "unlit"
 unix                = lib  "unix"
 win32               = lib  "Win32"
 xhtml               = lib  "xhtml"
+xml                 = lib  "xml"
 
 -- | Construct a library package, e.g. @array@.
 lib :: PackageName -> Package
