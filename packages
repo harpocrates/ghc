@@ -67,4 +67,5 @@ libraries/xhtml              -           -                               https:/
 nofib                        nofib       -                               -
 libraries/parallel           extra       -                               ssh://git@github.com/haskell/parallel.git
 libraries/stm                -           -                               ssh://git@github.com/haskell/stm.git
+libraries/xml                extra       _                               https://github.com/GaloisInc/xml.git
 .                            -           ghc.git                         -

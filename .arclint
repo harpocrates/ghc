@@ -116,6 +116,7 @@
       "(^libraries/parallel)",
       "(^libraries/stm)",
       "(^libraries/dph)",
+      "(^libraries/xml)",
       "(^utils/haddock)",
       "(^nofib)",
       "(^utils/hsc2hs)",

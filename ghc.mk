@@ -1217,7 +1217,7 @@ GIT_COMMIT_ID:
 sdist-ghc-prep-tree : VERSION GIT_COMMIT_ID
 
 # Extra packages which shouldn't be in the source distribution: see #8801
-EXTRA_PACKAGES=parallel
+EXTRA_PACKAGES = parallel xml
 
 .PHONY: sdist-ghc-prep-tree
 sdist-ghc-prep-tree :

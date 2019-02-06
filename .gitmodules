@@ -89,7 +89,8 @@
 	ignore = untracked
 [submodule "libraries/xml"]
 	path = libraries/xml
-	url = https://github.com/GaloisInc/xml.git
+	url = ../packages/xml.git
+	ignore = untracked
 [submodule "libraries/stm"]
 	path = libraries/stm
 	url = ../packages/stm.git
